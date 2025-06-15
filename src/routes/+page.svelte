@@ -148,7 +148,7 @@
       
       <div class="festival-info">
         <p class="description">
-            Once again I have the privelege to invite you to the annual summer party. Most of you know the drill by now: Bring what you want to eat/drink, let me know if you're crashing, and don't hesitate to invite people. 
+            Once again I have the privilege to invite you to the annual summer party. Most of you know the drill by now: Bring what you want to eat/drink, let me know if you're crashing, and don't hesitate to invite people. 
           
         </p>
         <div class="dress-code">
@@ -203,13 +203,13 @@
         <textarea
           id="message"
           bind:value={formData.message}
-          placeholder="What growth are you bringing to our forest? Any special energy or intentions to share?"
+          placeholder="Your message goes here!"
           rows="3"
         ></textarea>
       </div>
 
       <button type="submit" disabled={isSubmitting} class="submit-btn">
-        {isSubmitting ? 'Connecting...' : 'Join the Tribe'}
+        {isSubmitting ? 'Connecting...' : 'Join!!'}
       </button>
 
       {#if submitMessage}
@@ -221,7 +221,7 @@
   </section>
 
   <section class="attendee-carousel">
-    <h3>The Jungle Tribe Gathers</h3>
+    <h3>The plot thickens</h3>
     <div class="carousel-container">
       <div class="carousel" bind:this={carousel}>
         {#each rsvps.filter(r => r.attending) as rsvp, i}
@@ -249,11 +249,11 @@
     </div>
     
     <div class="energy-meter">
-      <div class="meter-label">Forest Energy</div>
+      <div class="meter-label">Hype meter</div>
       <div class="meter-bar">
         <div class="meter-fill" style="width: {Math.min(totalAttending * 5, 100)}%"></div>
       </div>
-      <div class="meter-text">{totalAttending} souls blooming in the rhythm</div>
+      <div class="meter-text">{totalAttending} people ready to rip</div>
     </div>
   </section>
 </main>

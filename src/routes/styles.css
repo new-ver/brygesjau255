@@ -15,7 +15,7 @@
     #1e3a2f 60%,
     #3d2914 80%,
     #0f1419 100%
-  );
+  ), url(bck.png);
   min-height: 100vh;
   position: relative;
   overflow-x: hidden;
@@ -36,6 +36,7 @@
   border-radius: 50%;
   animation: floralSpin 25s linear infinite, floralPulse 8s ease-in-out infinite;
   pointer-events: none;
+  background-image: url();
   z-index: -1;
 }
 
@@ -109,7 +110,7 @@
   margin: 0 auto;
   padding: 2rem;
   font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
-  color: #f8f9fa;
+  color: gray;
   position: relative;
   z-index: 1;
 }
@@ -539,13 +540,14 @@
 
 .form-group {
   margin-bottom: 2.5rem;
+  color: gray !important;
 }
 
 label {
   display: block;
   margin-bottom: 1rem;
   font-weight: 600;
-  background: linear-gradient(45deg, #ff6bb3, #7cfc00);
+  /* background: linear-gradient(45deg, #ff6bb3, #7cfc00); */
   -webkit-background-clip: text;
   -webkit-text-fill-color: transparent;
   background-clip: text;
@@ -575,7 +577,7 @@ textarea:focus {
 
 input::placeholder, 
 textarea::placeholder {
-  color: #adb5bd;
+  color: gray;
   font-weight: 400;
 }
 
@@ -592,14 +594,21 @@ textarea::placeholder {
   padding: 1.5rem;
   background: linear-gradient(135deg, rgba(255, 107, 181, 0.06), rgba(124, 252, 0, 0.04));
   border: 2px solid rgba(255, 107, 181, 0.2);
+  color: gray;
   border-radius: 20px;
   transition: all 0.4s ease;
   position: relative;
   font-weight: 500;
+  color: gray !important;
+  /* background: none !important; */
+  -webkit-background-clip: unset !important;
+  -webkit-text-fill-color: gray !important;
+  background-clip: unset !important;
 }
 
 .radio-option:hover {
   border-color: #ff6bb3;
+  color: black;
   background: linear-gradient(135deg, rgba(255, 107, 181, 0.12), rgba(124, 252, 0, 0.08));
   box-shadow: 0 8px 25px rgba(255, 107, 181, 0.2);
   transform: translateY(-2px);
@@ -908,7 +917,7 @@ textarea::placeholder {
 }
 
 .meter-text {
-  color: #f1f3f4;
+  color: gray;
   font-weight: 600;
   font-size: 1.2rem;
   animation: subtitleShimmer 8s ease-in-out infinite;
