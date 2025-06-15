@@ -84,7 +84,7 @@
 </script>
 
 <svelte:head>
-  <title>Bryggesjau - Psytrance Festival</title>
+  <title>Bryggesjau</title>
 </svelte:head>
 
 <!-- Cosmic Particle System -->
@@ -101,7 +101,7 @@
   <header>
     <div class="festival-logo">
       <h1>BRYGGESJAU25</h1>
-      <div class="subtitle">Psytrance Festival Experience</div>
+      <div class="subtitle">For 10yrs+</div>
     </div>
     
     <div class="party-details">
@@ -110,7 +110,7 @@
           <div class="detail-icon">📅</div>
           <div class="detail-content">
             <h3>When</h3>
-            <p>Saturday, August 9th, 2025</p>
+            <p>Saturday, <b style="color: black">August 9th</b>, 2025</p>
             <p class="time">18:00 - Late</p>
           </div>
         </div>
