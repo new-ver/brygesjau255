@@ -1,0 +1,976 @@
+/* ==========================================================================
+   BRYGGESJAU FESTIVAL - STYLISH FLORAL PSYTRANCE THEME
+   ========================================================================== */
+
+/* Base Styles + Vibrant Floral Background
+   ========================================================================== */
+
+:global(body) {
+  margin: 0;
+  background: linear-gradient(
+    135deg,
+    #0f1419 0%,
+    #1a2332 20%,
+    #2d1b3d 40%,
+    #1e3a2f 60%,
+    #3d2914 80%,
+    #0f1419 100%
+  );
+  min-height: 100vh;
+  position: relative;
+  overflow-x: hidden;
+}
+
+/* Floating Floral Mandala */
+:global(body)::before {
+  content: '';
+  position: fixed;
+  top: 5%;
+  right: -15%;
+  width: 500px;
+  height: 500px;
+  background: 
+    radial-gradient(circle at center, transparent 30%, rgba(255, 107, 181, 0.15) 31%, rgba(255, 107, 181, 0.15) 35%, transparent 36%),
+    radial-gradient(circle at center, transparent 50%, rgba(124, 252, 0, 0.12) 51%, rgba(124, 252, 0, 0.12) 55%, transparent 56%),
+    radial-gradient(circle at center, transparent 70%, rgba(255, 165, 0, 0.1) 71%, rgba(255, 165, 0, 0.1) 75%, transparent 76%);
+  border-radius: 50%;
+  animation: floralSpin 25s linear infinite, floralPulse 8s ease-in-out infinite;
+  pointer-events: none;
+  z-index: -1;
+}
+
+/* Sacred Geometry with Flower Colors */
+:global(body)::after {
+  content: '';
+  position: fixed;
+  bottom: -10%;
+  left: -10%;
+  width: 400px;
+  height: 400px;
+  background: 
+    conic-gradient(from 0deg, transparent, rgba(255, 20, 147, 0.12), transparent, rgba(50, 205, 50, 0.1), transparent, rgba(255, 140, 0, 0.08), transparent),
+    radial-gradient(circle at center, transparent 40%, rgba(138, 43, 226, 0.06) 41%, transparent 65%);
+  border-radius: 50%;
+  animation: petalFloat 20s ease-in-out infinite, petalRotate 30s linear infinite;
+  pointer-events: none;
+  z-index: -1;
+}
+
+/* Colorful Particle System */
+.cosmic-particles {
+  position: fixed;
+  top: 0;
+  left: 0;
+  width: 100%;
+  height: 100%;
+  pointer-events: none;
+  z-index: -1;
+}
+
+.particle {
+  position: absolute;
+  border-radius: 50%;
+  animation: particleFloat 12s infinite ease-in-out;
+}
+
+.particle:nth-child(1) { 
+  width: 5px; height: 5px; top: 15%; left: 10%; 
+  background: radial-gradient(circle, rgba(255, 107, 181, 0.8), transparent);
+  animation-delay: 0s; 
+}
+.particle:nth-child(2) { 
+  width: 7px; height: 7px; top: 70%; left: 20%; 
+  background: radial-gradient(circle, rgba(124, 252, 0, 0.7), transparent);
+  animation-delay: -2s; 
+}
+.particle:nth-child(3) { 
+  width: 4px; height: 4px; top: 85%; left: 35%; 
+  background: radial-gradient(circle, rgba(255, 165, 0, 0.8), transparent);
+  animation-delay: -4s; 
+}
+.particle:nth-child(4) { 
+  width: 6px; height: 6px; top: 25%; left: 70%; 
+  background: radial-gradient(circle, rgba(255, 20, 147, 0.7), transparent);
+  animation-delay: -6s; 
+}
+.particle:nth-child(5) { 
+  width: 5px; height: 5px; top: 60%; left: 85%; 
+  background: radial-gradient(circle, rgba(50, 205, 50, 0.8), transparent);
+  animation-delay: -8s; 
+}
+.particle:nth-child(6) { 
+  width: 8px; height: 8px; top: 40%; left: 90%; 
+  background: radial-gradient(circle, rgba(138, 43, 226, 0.7), transparent);
+  animation-delay: -10s; 
+}
+
+.container {
+  max-width: 1200px;
+  margin: 0 auto;
+  padding: 2rem;
+  font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+  color: #f8f9fa;
+  position: relative;
+  z-index: 1;
+}
+
+/* Stylish Floral Header
+   ========================================================================== */
+
+.festival-logo {
+  text-align: center;
+  margin-bottom: 3rem;
+  position: relative;
+}
+
+/* Elegant Flower Pattern Behind Logo */
+.festival-logo::before {
+  content: '';
+  position: absolute;
+  top: -60px;
+  left: 50%;
+  transform: translateX(-50%);
+  width: 250px;
+  height: 250px;
+  background: 
+    repeating-conic-gradient(from 0deg at center, 
+      transparent 0deg, 
+      rgba(255, 107, 181, 0.08) 12deg, 
+      transparent 24deg, 
+      rgba(124, 252, 0, 0.06) 36deg, 
+      transparent 48deg
+    );
+  border-radius: 50%;
+  animation: elegantSpin 50s linear infinite;
+  z-index: -1;
+}
+
+.festival-logo h1 {
+  font-size: 4rem;
+  margin: 0;
+  background: linear-gradient(45deg, #ff6bb3, #7cfc00, #ffa500, #ff1493, #32cd32, #8a2be2);
+  background-size: 400% 400%;
+  animation: floralFlow 6s ease-in-out infinite, floralGlow 8s ease-in-out infinite;
+  -webkit-background-clip: text;
+  -webkit-text-fill-color: transparent;
+  background-clip: text;
+  letter-spacing: 0.2em;
+  font-weight: 900;
+  position: relative;
+  z-index: 2;
+  text-shadow: 0 0 40px rgba(255, 107, 181, 0.3);
+}
+
+/* Beautiful Floral Decorations */
+.festival-logo h1::before {
+  content: '🌺';
+  position: absolute;
+  left: -70px;
+  top: 50%;
+  transform: translateY(-50%);
+  font-size: 3.5rem;
+  animation: petalDance 10s ease-in-out infinite;
+  filter: drop-shadow(0 0 25px rgba(255, 107, 181, 0.7));
+}
+
+.festival-logo h1::after {
+  content: '🌸';
+  position: absolute;
+  right: -70px;
+  top: 50%;
+  transform: translateY(-50%);
+  font-size: 3.5rem;
+  animation: bloomCycle 8s ease-in-out infinite, floralFloat 12s ease-in-out infinite;
+  filter: drop-shadow(0 0 25px rgba(255, 182, 193, 0.7));
+}
+
+.subtitle {
+  font-size: 1.3rem;
+  background: linear-gradient(45deg, #ff6bb3, #7cfc00);
+  -webkit-background-clip: text;
+  -webkit-text-fill-color: transparent;
+  background-clip: text;
+  margin-top: 0.5rem;
+  letter-spacing: 0.15em;
+  text-transform: uppercase;
+  animation: subtitleShimmer 5s ease-in-out infinite;
+}
+
+/* Stylish Floral Animations
+   ========================================================================== */
+
+@keyframes floralFlow {
+  0%, 100% { background-position: 0% 50%; }
+  25% { background-position: 100% 25%; }
+  50% { background-position: 50% 100%; }
+  75% { background-position: 25% 0%; }
+}
+
+@keyframes petalDance {
+  0%, 100% { 
+    transform: translateY(-50%) rotate(-10deg) scale(1); 
+    filter: drop-shadow(0 0 25px rgba(255, 107, 181, 0.7)) hue-rotate(0deg);
+  }
+  20% { 
+    transform: translateY(-60%) rotate(15deg) scale(1.2); 
+    filter: drop-shadow(0 0 35px rgba(255, 20, 147, 0.8)) hue-rotate(60deg);
+  }
+  40% { 
+    transform: translateY(-40%) rotate(-20deg) scale(0.9); 
+    filter: drop-shadow(0 0 30px rgba(255, 140, 0, 0.7)) hue-rotate(120deg);
+  }
+  60% { 
+    transform: translateY(-55%) rotate(25deg) scale(1.1); 
+    filter: drop-shadow(0 0 40px rgba(124, 252, 0, 0.8)) hue-rotate(180deg);
+  }
+  80% { 
+    transform: translateY(-45%) rotate(-15deg) scale(1.05); 
+    filter: drop-shadow(0 0 32px rgba(138, 43, 226, 0.7)) hue-rotate(240deg);
+  }
+}
+
+@keyframes bloomCycle {
+  0%, 100% { 
+    transform: translateY(-50%) scale(1) rotate(0deg); 
+  }
+  50% { 
+    transform: translateY(-50%) scale(1.4) rotate(180deg); 
+  }
+}
+
+@keyframes floralFloat {
+  0%, 100% { 
+    transform: translateY(-50%) translateX(0px); 
+  }
+  33% { 
+    transform: translateY(-65%) translateX(15px); 
+  }
+  66% { 
+    transform: translateY(-35%) translateX(-15px); 
+  }
+}
+
+@keyframes floralGlow {
+  0%, 100% { 
+    text-shadow: 0 0 40px rgba(255, 107, 181, 0.3), 0 0 80px rgba(124, 252, 0, 0.2); 
+  }
+  25% { 
+    text-shadow: 0 0 60px rgba(255, 20, 147, 0.5), 0 0 120px rgba(255, 165, 0, 0.3), 0 0 160px rgba(138, 43, 226, 0.2); 
+  }
+  50% { 
+    text-shadow: 0 0 50px rgba(124, 252, 0, 0.6), 0 0 100px rgba(50, 205, 50, 0.4), 0 0 140px rgba(255, 107, 181, 0.3); 
+  }
+  75% { 
+    text-shadow: 0 0 70px rgba(255, 165, 0, 0.5), 0 0 110px rgba(255, 20, 147, 0.3), 0 0 150px rgba(124, 252, 0, 0.2); 
+  }
+}
+
+@keyframes subtitleShimmer {
+  0%, 100% { 
+    opacity: 0.8; 
+    transform: scale(1);
+  }
+  50% { 
+    opacity: 1; 
+    transform: scale(1.08);
+  }
+}
+
+@keyframes elegantSpin {
+  0% { transform: translateX(-50%) rotate(0deg); }
+  100% { transform: translateX(-50%) rotate(360deg); }
+}
+
+@keyframes floralSpin {
+  0% { transform: rotate(0deg) scale(1); }
+  50% { transform: rotate(180deg) scale(1.15); }
+  100% { transform: rotate(360deg) scale(1); }
+}
+
+@keyframes floralPulse {
+  0%, 100% { opacity: 0.4; }
+  50% { opacity: 0.8; }
+}
+
+@keyframes petalFloat {
+  0%, 100% { transform: translateY(0px) scale(1); }
+  33% { transform: translateY(-40px) scale(1.1); }
+  66% { transform: translateY(25px) scale(0.95); }
+}
+
+@keyframes petalRotate {
+  0% { transform: rotate(0deg); }
+  100% { transform: rotate(-360deg); }
+}
+
+@keyframes particleFloat {
+  0%, 100% { 
+    transform: translateY(0px) translateX(0px) scale(1);
+    opacity: 0.4;
+  }
+  25% { 
+    transform: translateY(-60px) translateX(25px) scale(1.3);
+    opacity: 0.9;
+  }
+  50% { 
+    transform: translateY(-35px) translateX(-20px) scale(0.8);
+    opacity: 1;
+  }
+  75% { 
+    transform: translateY(-80px) translateX(15px) scale(1.1);
+    opacity: 0.7;
+  }
+}
+
+@keyframes floralShimmer {
+  0% { left: -100%; }
+  100% { left: 100%; }
+}
+
+@keyframes gardenKaleidoscope {
+  0%, 100% { 
+    transform: rotate(0deg) scale(1);
+    filter: hue-rotate(0deg) saturate(1) brightness(1);
+  }
+  25% { 
+    transform: rotate(90deg) scale(1.1);
+    filter: hue-rotate(90deg) saturate(1.2) brightness(1.1);
+  }
+  50% { 
+    transform: rotate(180deg) scale(0.9);
+    filter: hue-rotate(180deg) saturate(0.8) brightness(0.9);
+  }
+  75% { 
+    transform: rotate(270deg) scale(1.05);
+    filter: hue-rotate(270deg) saturate(1.1) brightness(1.05);
+  }
+}
+
+/* Stylish Floral Party Details
+   ========================================================================== */
+
+.party-details {
+  background: linear-gradient(135deg, rgba(255, 107, 181, 0.08), rgba(124, 252, 0, 0.06), rgba(255, 165, 0, 0.05));
+  backdrop-filter: blur(20px);
+  border: 2px solid rgba(255, 107, 181, 0.2);
+  border-radius: 30px;
+  padding: 3rem;
+  margin-bottom: 3rem;
+  position: relative;
+  overflow: hidden;
+  box-shadow: 0 10px 40px rgba(255, 107, 181, 0.15);
+}
+
+.party-details::before {
+  content: '';
+  position: absolute;
+  top: -50%;
+  left: -50%;
+  width: 200%;
+  height: 200%;
+  background: 
+    repeating-conic-gradient(from 0deg at 25% 75%, 
+      transparent 0deg, 
+      rgba(255, 107, 181, 0.03) 18deg, 
+      transparent 36deg
+    ),
+    repeating-conic-gradient(from 90deg at 75% 25%, 
+      transparent 0deg, 
+      rgba(124, 252, 0, 0.02) 24deg, 
+      transparent 48deg
+    );
+  animation: gardenKaleidoscope 80s linear infinite;
+  z-index: -1;
+}
+
+.detail-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(260px, 1fr));
+  gap: 2rem;
+  margin-bottom: 2rem;
+}
+
+.detail-item {
+  display: flex;
+  align-items: center;
+  gap: 1.2rem;
+  padding: 2rem;
+  background: linear-gradient(135deg, rgba(255, 107, 181, 0.1), rgba(124, 252, 0, 0.08));
+  border-radius: 25px;
+  border: 1px solid rgba(255, 107, 181, 0.3);
+  transition: all 0.4s ease;
+  position: relative;
+  overflow: hidden;
+}
+
+.detail-item::before {
+  content: '';
+  position: absolute;
+  top: 0;
+  left: 0;
+  width: 100%;
+  height: 100%;
+  background: linear-gradient(45deg, transparent, rgba(255, 107, 181, 0.15), transparent);
+  transform: translateX(-100%);
+  transition: transform 0.6s ease;
+}
+
+.detail-item:hover::before {
+  transform: translateX(100%);
+}
+
+.detail-item:hover {
+  transform: translateY(-10px);
+  box-shadow: 0 20px 50px rgba(255, 107, 181, 0.25);
+  border-color: #ff6bb3;
+  background: linear-gradient(135deg, rgba(255, 107, 181, 0.15), rgba(124, 252, 0, 0.12));
+}
+
+.detail-icon {
+  font-size: 2.5rem;
+  min-width: 70px;
+  text-align: center;
+}
+
+.detail-content h3 {
+  margin: 0 0 0.5rem 0;
+  background: linear-gradient(45deg, #ff6bb3, #7cfc00);
+  -webkit-background-clip: text;
+  -webkit-text-fill-color: transparent;
+  background-clip: text;
+  font-size: 1.2rem;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  font-weight: 700;
+}
+
+.detail-content p {
+  margin: 0.3rem 0;
+  color: gray;
+  font-weight: 500;
+}
+
+.detail-content .time,
+.detail-content .location,
+.detail-content .genre,
+.detail-content .food {
+  color: lightslategray;
+  font-size: 0.95rem;
+  opacity: 0.9;
+}
+
+.festival-info {
+  text-align: center;
+  margin-top: 2.5rem;
+  padding-top: 2.5rem;
+  border-top: 1px solid rgba(255, 107, 181, 0.2);
+}
+
+.description {
+  font-size: 1.2rem;
+  line-height: 1.7;
+  color: gray;
+  margin-bottom: 2rem;
+  font-weight: 400;
+}
+
+.dress-code {
+  background: linear-gradient(135deg, rgba(255, 107, 181, 0.12), rgba(124, 252, 0, 0.1));
+  border: 2px solid rgba(255, 107, 181, 0.3);
+  border-radius: 20px;
+  padding: 2rem;
+  color: gray;
+  position: relative;
+  font-weight: 500;
+}
+
+/* .dress-code::before {
+  content: '🌸';
+  position: absolute;
+  top: -12px;
+  left: 25px;
+  font-size: 2rem;
+  background: linear-gradient(135deg, rgba(15, 20, 25, 0.9), rgba(26, 35, 50, 0.8));
+  padding: 0 15px;
+} */
+
+/* Stylish RSVP Form
+   ========================================================================== */
+
+.rsvp-form {
+  background: linear-gradient(135deg, rgba(255, 107, 181, 0.08), rgba(124, 252, 0, 0.06), rgba(255, 165, 0, 0.05));
+  backdrop-filter: blur(20px);
+  border: 2px solid rgba(255, 107, 181, 0.2);
+  padding: 3.5rem;
+  border-radius: 30px;
+  margin-bottom: 3rem;
+  position: relative;
+  overflow: hidden;
+}
+
+/* .rsvp-form::before {
+  content: '🌺🌸🌻';
+  position: absolute;
+  top: 1.5rem;
+  right: 2.5rem;
+  font-size: 2.5rem;
+  opacity: 0.3;
+} */
+
+.rsvp-form h3 {
+  text-align: center;
+  font-size: 2.5rem;
+  margin-bottom: 1rem;
+  background: linear-gradient(45deg, #ff6bb3, #7cfc00, #ffa500);
+  -webkit-background-clip: text;
+  -webkit-text-fill-color: transparent;
+  background-clip: text;
+  font-weight: 800;
+  animation: floralGlow 6s ease-in-out infinite;
+}
+
+.form-description {
+  text-align: center;
+  color: gray;
+  margin-bottom: 2.5rem;
+  font-size: 1.2rem;
+  font-weight: 400;
+}
+
+.form-group {
+  margin-bottom: 2.5rem;
+}
+
+label {
+  display: block;
+  margin-bottom: 1rem;
+  font-weight: 600;
+  background: linear-gradient(45deg, #ff6bb3, #7cfc00);
+  -webkit-background-clip: text;
+  -webkit-text-fill-color: transparent;
+  background-clip: text;
+  font-size: 1.2rem;
+}
+
+input, 
+textarea {
+  width: 100%;
+  padding: 1.2rem;
+  border: 2px solid rgba(255, 107, 181, 0.3);
+  border-radius: 20px;
+  font-size: 1.1rem;
+  background: linear-gradient(135deg, rgba(255, 107, 181, 0.05), rgba(124, 252, 0, 0.03));
+  color: gray;
+  transition: all 0.4s ease;
+  font-weight: 500;
+}
+
+input:focus, 
+textarea:focus {
+  outline: none;
+  border-color: #ff6bb3;
+  box-shadow: 0 0 30px rgba(255, 107, 181, 0.4), inset 0 0 15px rgba(255, 107, 181, 0.1);
+  background: linear-gradient(135deg, rgba(255, 107, 181, 0.1), rgba(124, 252, 0, 0.08));
+}
+
+input::placeholder, 
+textarea::placeholder {
+  color: #adb5bd;
+  font-weight: 400;
+}
+
+.radio-group {
+  display: flex;
+  flex-direction: column;
+  gap: 1.2rem;
+}
+
+.radio-option {
+  display: flex;
+  align-items: center;
+  cursor: pointer;
+  padding: 1.5rem;
+  background: linear-gradient(135deg, rgba(255, 107, 181, 0.06), rgba(124, 252, 0, 0.04));
+  border: 2px solid rgba(255, 107, 181, 0.2);
+  border-radius: 20px;
+  transition: all 0.4s ease;
+  position: relative;
+  font-weight: 500;
+}
+
+.radio-option:hover {
+  border-color: #ff6bb3;
+  background: linear-gradient(135deg, rgba(255, 107, 181, 0.12), rgba(124, 252, 0, 0.08));
+  box-shadow: 0 8px 25px rgba(255, 107, 181, 0.2);
+  transform: translateY(-2px);
+}
+
+.radio-option input[type="radio"] {
+  opacity: 0;
+  position: absolute;
+  width: 0;
+}
+
+.radio-custom {
+  width: 24px;
+  height: 24px;
+  border: 3px solid #ff6bb3;
+  border-radius: 50%;
+  margin-right: 1.5rem;
+  position: relative;
+  transition: all 0.3s ease;
+  box-shadow: 0 0 15px rgba(255, 107, 181, 0.3);
+}
+
+.radio-option input[type="radio"]:checked + .radio-custom::after {
+  content: '';
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  transform: translate(-50%, -50%);
+  width: 12px;
+  height: 12px;
+  background: radial-gradient(circle, #ff6bb3, #ff1493);
+  border-radius: 50%;
+  box-shadow: 0 0 20px rgba(255, 107, 181, 1);
+}
+
+.submit-btn {
+  background: linear-gradient(45deg, #ff6bb3, #7cfc00, #ffa500, #ff1493);
+  background-size: 300% 300%;
+  color: #000000;
+  border: none;
+  padding: 1.5rem 4rem;
+  border-radius: 35px;
+  font-size: 1.3rem;
+  font-weight: 800;
+  cursor: pointer;
+  transition: all 0.5s ease;
+  width: 100%;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  position: relative;
+  overflow: hidden;
+  box-shadow: 0 10px 30px rgba(255, 107, 181, 0.4);
+  text-shadow: 0 1px 2px rgba(255, 255, 255, 0.2);
+  animation: floralFlow 8s ease-in-out infinite;
+}
+
+.submit-btn:hover:not(:disabled) {
+  transform: translateY(-8px);
+  box-shadow: 0 20px 50px rgba(255, 107, 181, 0.6);
+  background-size: 400% 400%;
+}
+
+.submit-btn:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
+}
+
+.message {
+  margin-top: 2rem;
+  padding: 1.5rem;
+  border-radius: 15px;
+  font-weight: 600;
+  text-align: center;
+  font-size: 1.1rem;
+}
+
+.message.success {
+  background: linear-gradient(135deg, rgba(124, 252, 0, 0.2), rgba(50, 205, 50, 0.15));
+  color: #7cfc00;
+  border: 2px solid #32cd32;
+  box-shadow: 0 0 25px rgba(124, 252, 0, 0.4);
+}
+
+.message.error {
+  background: linear-gradient(135deg, rgba(255, 99, 71, 0.2), rgba(255, 69, 0, 0.15));
+  color: #ff6347;
+  border: 2px solid #ff4500;
+  box-shadow: 0 0 25px rgba(255, 99, 71, 0.4);
+}
+
+/* Stylish Attendee Carousel
+   ========================================================================== */
+
+.attendee-carousel {
+  margin-bottom: 3rem;
+}
+
+.attendee-carousel h3 {
+  text-align: center;
+  font-size: 2.5rem;
+  margin-bottom: 2.5rem;
+  background: linear-gradient(45deg, #ff6bb3, #7cfc00, #ffa500);
+  -webkit-background-clip: text;
+  -webkit-text-fill-color: transparent;
+  background-clip: text;
+  font-weight: 800;
+  animation: floralGlow 6s ease-in-out infinite;
+}
+
+.carousel-container {
+  position: relative;
+  overflow: hidden;
+  border-radius: 30px;
+  padding: 2.5rem 0;
+  background: linear-gradient(135deg, rgba(255, 107, 181, 0.06), rgba(124, 252, 0, 0.04));
+}
+
+.carousel {
+  display: flex;
+  gap: 2rem;
+  transition: transform 0.6s ease;
+  padding: 0 1.5rem;
+}
+
+.attendee-card {
+  min-width: 320px;
+  background: linear-gradient(135deg, rgba(255, 107, 181, 0.1), rgba(124, 252, 0, 0.08));
+  backdrop-filter: blur(20px);
+  border: 2px solid rgba(255, 107, 181, 0.3);
+  border-radius: 25px;
+  padding: 2.5rem;
+  text-align: center;
+  transition: all 0.5s ease;
+  position: relative;
+  overflow: hidden;
+}
+
+
+.attendee-card:hover {
+  transform: translateY(-20px);
+  box-shadow: 0 25px 60px rgba(255, 107, 181, 0.3);
+  border-color: #ff6bb3;
+  background: linear-gradient(135deg, rgba(255, 107, 181, 0.15), rgba(124, 252, 0, 0.12));
+}
+
+.avatar {
+  width: 90px;
+  height: 90px;
+  background: linear-gradient(45deg, #ff6bb3, #7cfc00, #ffa500);
+  border-radius: 50%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  margin: 0 auto 1.5rem;
+  position: relative;
+  box-shadow: 0 10px 30px rgba(255, 107, 181, 0.5);
+  overflow: hidden;
+  animation: floralFlow 8s ease-in-out infinite;
+}
+
+.avatar-text {
+  font-size: 1rem;
+  font-weight: bold;
+  color: #000000;
+  text-align: center;
+  padding: 0.5rem;
+  text-shadow: 0 1px 2px rgba(255, 255, 255, 0.3);
+  line-height: 1.2;
+  word-break: break-word;
+  max-width: 100%;
+}
+
+.attendee-name {
+  font-size: 1.3rem;
+  font-weight: 700;
+  background: linear-gradient(45deg, #ff6bb3, #7cfc00);
+  -webkit-background-clip: text;
+  -webkit-text-fill-color: transparent;
+  background-clip: text;
+  margin-bottom: 0.8rem;
+}
+
+.attendee-message {
+  color: lightslategray;
+  font-style: italic;
+  margin-bottom: 0.8rem;
+  font-size: 1rem;
+  line-height: 1.5;
+  font-weight: 400;
+}
+
+.join-time {
+  color: #adb5bd;
+  font-size: 0.9rem;
+  opacity: 0.8;
+  font-weight: 500;
+}
+
+.carousel-btn {
+  position: absolute;
+  top: 50%;
+  transform: translateY(-50%);
+  background: linear-gradient(135deg, rgba(255, 107, 181, 0.3), rgba(124, 252, 0, 0.2));
+  border: 2px solid rgba(255, 107, 181, 0.5);
+  color: #ff6bb3;
+  width: 55px;
+  height: 55px;
+  border-radius: 50%;
+  cursor: pointer;
+  font-size: 1.6rem;
+  transition: all 0.4s ease;
+  backdrop-filter: blur(15px);
+  box-shadow: 0 6px 20px rgba(255, 107, 181, 0.3);
+  font-weight: bold;
+}
+
+.carousel-btn:hover {
+  background: linear-gradient(135deg, rgba(255, 107, 181, 0.5), rgba(124, 252, 0, 0.3));
+  border-color: #ff6bb3;
+  box-shadow: 0 10px 35px rgba(255, 107, 181, 0.5);
+  transform: translateY(-50%) scale(1.15);
+}
+
+.carousel-btn.prev {
+  left: 1.5rem;
+}
+
+.carousel-btn.next {
+  right: 1.5rem;
+}
+
+/* Stylish Energy Meter
+   ========================================================================== */
+
+.energy-meter {
+  text-align: center;
+  margin-top: 3.5rem;
+  padding: 2.5rem;
+  background: linear-gradient(135deg, rgba(255, 107, 181, 0.08), rgba(124, 252, 0, 0.06));
+  border-radius: 25px;
+  border: 2px solid rgba(255, 107, 181, 0.2);
+  position: relative;
+  overflow: hidden;
+}
+
+
+.energy-meter::after {
+  content: '';
+  position: absolute;
+  top: 0;
+  left: 0;
+  width: 100%;
+  height: 100%;
+  background: 
+    radial-gradient(ellipse at 25% 25%, rgba(255, 107, 181, 0.1) 0%, transparent 60%),
+    radial-gradient(ellipse at 75% 75%, rgba(124, 252, 0, 0.08) 0%, transparent 70%);
+  animation: floralPulse 12s ease-in-out infinite;
+  z-index: -1;
+}
+
+.meter-label {
+  font-size: 1.4rem;
+  font-weight: 700;
+  background: linear-gradient(45deg, #ff6bb3, #7cfc00);
+  -webkit-background-clip: text;
+  -webkit-text-fill-color: transparent;
+  background-clip: text;
+  margin-bottom: 1.5rem;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  animation: floralGlow 7s ease-in-out infinite;
+}
+
+.meter-bar {
+  width: 100%;
+  height: 30px;
+  background: rgba(255, 107, 181, 0.1);
+  border-radius: 20px;
+  overflow: hidden;
+  margin-bottom: 1.5rem;
+  position: relative;
+  border: 2px solid rgba(255, 107, 181, 0.3);
+  box-shadow: inset 0 0 25px rgba(255, 107, 181, 0.2);
+}
+
+.meter-fill {
+  height: 100%;
+  background: linear-gradient(90deg, #ff6bb3, #7cfc00, #ffa500, #ff1493, #32cd32);
+  background-size: 300% 100%;
+  border-radius: 20px;
+  transition: width 1s ease;
+  position: relative;
+  box-shadow: 0 0 25px rgba(255, 107, 181, 0.7);
+  animation: floralFlow 4s ease-in-out infinite;
+}
+
+.meter-fill::after {
+  content: '';
+  position: absolute;
+  top: 0;
+  left: -100%;
+  width: 100%;
+  height: 100%;
+  background: linear-gradient(90deg, transparent, rgba(255, 255, 255, 0.9), transparent);
+  animation: floralShimmer 2.5s infinite;
+}
+
+.meter-text {
+  color: #f1f3f4;
+  font-weight: 600;
+  font-size: 1.2rem;
+  animation: subtitleShimmer 8s ease-in-out infinite;
+}
+
+/* Responsive Design
+   ========================================================================== */
+
+@media (max-width: 768px) {
+  .container {
+    padding: 1.5rem;
+  }
+
+  .festival-logo h1 {
+    font-size: 2.8rem;
+  }
+
+  .festival-logo h1::before,
+  .festival-logo h1::after {
+    display: none;
+  }
+
+  .detail-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .carousel {
+    justify-content: flex-start;
+  }
+
+  .attendee-card {
+    min-width: 280px;
+  }
+
+  .carousel-btn {
+    width: 45px;
+    height: 45px;
+    font-size: 1.3rem;
+  }
+
+  .avatar {
+    width: 70px;
+    height: 70px;
+  }
+
+  .avatar-text {
+    font-size: 0.9rem;
+  }
+
+  .party-details::after,
+  .rsvp-form::before,
+  .energy-meter::before {
+    display: none;
+  }
+
+  .submit-btn {
+    padding: 1.2rem 2rem;
+    font-size: 1.1rem;
+  }
+
+  .submit-btn::before {
+    left: 1.5rem;
+    font-size: 1.5rem;
+  }
+}
