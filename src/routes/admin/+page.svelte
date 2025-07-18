@@ -31,32 +31,37 @@
   let selectedPlayers: string[] = []
 
   async function loadGameData() {
-    try {
-      // Load players
-      const { data: playersData, error: playersError } = await supabase
-        .from('game_players')
-        .select('*')
-        .order('joined_at', { ascending: true })
+  try {
+    // Load players
+    const { data: playersData, error: playersError } = await supabase
+      .from('game_players')
+      .select('*')
+      .order('joined_at', { ascending: true })
 
-      if (playersError) throw playersError
-      players = playersData || []
+    if (playersError) throw new Error(`Players error: ${playersError.message}`)
+    players = playersData ?? []
 
-      // Load game state
-      const { data: stateData, error: stateError } = await supabase
-        .from('game_state')
-        .select('*')
-        .single()
+    // Load game state
+    const { data: stateData, error: stateError } = await supabase
+      .from('game_state')
+      .select('*')
+      .single()
 
-      if (stateError && stateError.code !== 'PGRST116') { // Ignore "no rows" error
-        throw stateError
+    if (stateError) {
+      // Ignore specific "no rows" error (code PGRST116 or message with "Results contain 0 rows")
+      if (stateError.code !== 'PGRST116' && !stateError.message.includes('Results contain 0 rows')) {
+        throw new Error(`Game state error: ${stateError.message}`)
       }
-      gameState = stateData
-
-    } catch (error: any) {
-      console.error('Error loading game data:', error)
-      adminMessage = `Error loading data: ${error.message}`
     }
+
+    gameState = stateData ?? null
+
+  } catch (error: any) {
+    console.error('Error loading game data:', error)
+    adminMessage = `Error loading data: ${error.message ?? 'Unknown error'}`
   }
+}
+
 
   async function startGame() {
     if (players.length < 3) {
@@ -83,6 +88,16 @@
       isProcessing = false
     }
   }
+
+    function handlePhaseNavigation() {
+    if (!gameState) return;
+
+    // Navigate on first phase transition
+    if (gameState.status === 'night' || gameState.status === 'day' || gameState.status === 'voting') {
+      goto('/game'); // Adjust if your board route is different
+    }
+  }
+
 
   async function resetGame() {
     if (!confirm('Are you sure you want to reset the entire game? This will clear all players and progress.')) {
