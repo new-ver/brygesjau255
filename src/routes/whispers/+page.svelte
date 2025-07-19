@@ -283,25 +283,6 @@
      CULT VILLAGE HORROR GAME - COMPONENT SCOPED STYLES
      ========================================================================== */
 
-	.game-container {
-		/* Reset any inherited floral styles */
-		all: initial;
-		display: block;
-
-		/* Dark Village Atmosphere */
-		background:
-			radial-gradient(ellipse at top, #1a1a2e 0%, #16213e 30%, #0f0f23 60%, #000000 100%),
-			linear-gradient(180deg, #0a0a0f 0%, #1a1320 40%, #2d1b2e 70%, #000000 100%);
-		min-height: 100vh;
-		position: relative;
-		overflow-x: hidden;
-		font-family: 'Georgia', 'Times New Roman', serif;
-		color: #d4d4d8;
-		box-sizing: border-box;
-	}
-
-	/* Add these styles to your existing lobby CSS */
-
 	/* Join Game Section */
 	.join-game-section {
 		margin-bottom: 2rem;
@@ -453,27 +434,6 @@
 		color: #8b8680;
 		margin: 0.25rem 0 0 0;
 		font-style: italic;
-	}
-
-	/* Clear Lobby Button */
-	.clear-lobby-btn {
-		background: linear-gradient(135deg, rgba(107, 114, 128, 0.2), rgba(75, 85, 99, 0.15));
-		border: 2px solid rgba(107, 114, 128, 0.4);
-		color: #9ca3af;
-		padding: 0.8rem 1.5rem;
-		border-radius: 10px;
-		cursor: pointer;
-		transition: all 0.3s ease;
-		font-family: 'Georgia', serif;
-		font-size: 0.9rem;
-		margin-top: 1rem;
-	}
-
-	.clear-lobby-btn:hover {
-		background: linear-gradient(135deg, rgba(107, 114, 128, 0.4), rgba(75, 85, 99, 0.3));
-		border-color: #6b7280;
-		color: #f3f4f6;
-		transform: translateY(-1px);
 	}
 
 	/* Message Display */
