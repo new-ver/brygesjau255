@@ -631,215 +631,6 @@
 		}
 	}
 
-	/* Ensure all child elements use border-box */
-	.game-container *,
-	.game-container *::before,
-	.game-container *::after {
-		box-sizing: border-box;
-	}
-
-	/* Creeping Fog Effect */
-	.game-container::before {
-		content: '';
-		position: fixed;
-		bottom: -50px;
-		left: -50%;
-		width: 200%;
-		height: 300px;
-		background:
-			radial-gradient(ellipse at center, rgba(139, 137, 137, 0.1) 0%, transparent 70%),
-			radial-gradient(ellipse at 20% 50%, rgba(169, 169, 169, 0.05) 0%, transparent 60%),
-			radial-gradient(ellipse at 80% 30%, rgba(105, 105, 105, 0.08) 0%, transparent 50%);
-		animation:
-			creepingFog 25s ease-in-out infinite,
-			fogDrift 40s linear infinite;
-		pointer-events: none;
-		z-index: -1;
-	}
-
-	/* Ominous Shadows */
-	.game-container::after {
-		content: '';
-		position: fixed;
-		top: -20%;
-		right: -30%;
-		width: 80%;
-		height: 120%;
-		background:
-			radial-gradient(
-				ellipse at center,
-				transparent 30%,
-				rgba(139, 0, 0, 0.03) 50%,
-				transparent 80%
-			),
-			conic-gradient(
-				from 0deg,
-				transparent,
-				rgba(64, 0, 0, 0.05),
-				transparent,
-				rgba(25, 25, 112, 0.03),
-				transparent
-			);
-		animation: ominousShadows 60s ease-in-out infinite;
-		pointer-events: none;
-		z-index: -1;
-	}
-
-	/* Floating Blood Droplets */
-	.blood-particles {
-		position: fixed;
-		top: 0;
-		left: 0;
-		width: 100%;
-		height: 100%;
-		pointer-events: none;
-		z-index: -1;
-	}
-
-	.blood-drop {
-		position: absolute;
-		width: 3px;
-		height: 8px;
-		background: radial-gradient(ellipse, rgba(139, 0, 0, 0.6), rgba(75, 0, 0, 0.3));
-		border-radius: 50% 50% 50% 50% / 60% 60% 40% 40%;
-		animation: bloodFall 15s infinite linear;
-	}
-
-	.blood-drop:nth-child(1) {
-		left: 15%;
-		animation-delay: 0s;
-	}
-	.blood-drop:nth-child(2) {
-		left: 35%;
-		animation-delay: -3s;
-	}
-	.blood-drop:nth-child(3) {
-		left: 55%;
-		animation-delay: -6s;
-	}
-	.blood-drop:nth-child(4) {
-		left: 75%;
-		animation-delay: -9s;
-	}
-	.blood-drop:nth-child(5) {
-		left: 85%;
-		animation-delay: -12s;
-	}
-
-	/* Dark Container */
-	.container {
-		max-width: 1200px;
-		margin: 0 auto;
-		padding: 2rem;
-		color: #d4d4d8;
-		position: relative;
-		z-index: 1;
-	}
-
-	/* Sinister Game Header */
-	.game-logo {
-		text-align: center;
-		margin-bottom: 3rem;
-		position: relative;
-	}
-
-	/* Occult Symbol Behind Logo */
-	.game-logo::before {
-		content: '';
-		position: absolute;
-		top: -80px;
-		left: 50%;
-		transform: translateX(-50%);
-		width: 300px;
-		height: 300px;
-		background: conic-gradient(
-			from 0deg,
-			transparent 0deg,
-			rgba(139, 0, 0, 0.08) 45deg,
-			transparent 90deg,
-			rgba(25, 25, 112, 0.06) 135deg,
-			transparent 180deg,
-			rgba(139, 0, 0, 0.08) 225deg,
-			transparent 270deg,
-			rgba(64, 0, 0, 0.05) 315deg,
-			transparent 360deg
-		);
-		border-radius: 50%;
-		animation: occultSpin 80s linear infinite;
-		z-index: -1;
-	}
-
-	.game-logo h1 {
-		font-size: 3.5rem;
-		margin: 0;
-		background: linear-gradient(45deg, #8b0000, #191970, #2f1b14, #8b0000);
-		background-size: 300% 300%;
-		animation: bloodFlow 8s ease-in-out infinite;
-		-webkit-background-clip: text;
-		-webkit-text-fill-color: transparent;
-		background-clip: text;
-		letter-spacing: 0.15em;
-		font-weight: 900;
-		font-family: 'Georgia', serif;
-		text-shadow: 0 0 30px rgba(139, 0, 0, 0.5);
-		position: relative;
-	}
-
-	/* Dark Decorative Elements */
-	.game-logo h1::before {
-		content: '🗡️';
-		position: absolute;
-		left: -60px;
-		top: 50%;
-		transform: translateY(-50%);
-		font-size: 2.5rem;
-		animation: weaponGlint 12s ease-in-out infinite;
-		filter: drop-shadow(0 0 15px rgba(139, 0, 0, 0.7));
-	}
-
-	.game-logo h1::after {
-		content: '☠️';
-		position: absolute;
-		right: -60px;
-		top: 50%;
-		transform: translateY(-50%);
-		font-size: 2.5rem;
-		animation: skullFloat 10s ease-in-out infinite;
-		filter: drop-shadow(0 0 15px rgba(75, 0, 0, 0.8));
-	}
-
-	.game-subtitle {
-		font-size: 1.2rem;
-		color: #8b8680;
-		margin-top: 1rem;
-		letter-spacing: 0.2em;
-		text-transform: uppercase;
-		font-weight: 600;
-		animation: subtleGlow 6s ease-in-out infinite;
-	}
-
-	/* Back Button */
-	.back-btn {
-		background: linear-gradient(135deg, rgba(139, 0, 0, 0.2), rgba(25, 25, 112, 0.15));
-		border: 2px solid rgba(139, 0, 0, 0.4);
-		color: #d4d4d8;
-		padding: 0.8rem 1.5rem;
-		border-radius: 10px;
-		cursor: pointer;
-		transition: all 0.3s ease;
-		font-family: 'Georgia', serif;
-		text-decoration: none;
-		display: inline-block;
-		margin-bottom: 1rem;
-	}
-
-	.back-btn:hover {
-		background: linear-gradient(135deg, rgba(139, 0, 0, 0.4), rgba(25, 25, 112, 0.3));
-		border-color: #8b0000;
-		color: #ffffff;
-		transform: translateY(-2px);
-	}
-
 	/* Dark Village Interface Elements */
 	.village-panel {
 		background:
@@ -880,13 +671,6 @@
 		-webkit-text-fill-color: unset;
 		text-shadow: none;
 		animation: none;
-	}
-
-	.story-text p {
-		color: #d4d4d8;
-		line-height: 1.6;
-		margin-bottom: 1rem;
-		font-family: 'Georgia', serif;
 	}
 
 	.join-description {
@@ -1004,15 +788,6 @@
 		font-size: 1.2rem;
 	}
 
-	.debug-info {
-		background: rgba(0, 0, 0, 0.3);
-		padding: 1rem;
-		border-radius: 8px;
-		margin-bottom: 1.5rem;
-		font-size: 0.9rem;
-		color: #8b8680;
-	}
-
 	.empty-lobby {
 		text-align: center;
 		padding: 2rem;
@@ -1099,52 +874,6 @@
 	.status-dot.alive {
 		background: #32cd32;
 		box-shadow: 0 0 8px rgba(50, 205, 50, 0.5);
-	}
-
-	.lobby-actions {
-		display: flex;
-		gap: 1rem;
-		flex-wrap: wrap;
-		align-items: center;
-	}
-
-	.requirement-text {
-		color: #8b8680;
-		font-style: italic;
-		margin: 0;
-	}
-
-	/* Game Status Messages */
-	.message {
-		margin-top: 1rem;
-		padding: 1rem;
-		border-radius: 10px;
-		text-align: center;
-		font-weight: 600;
-	}
-
-	.death-message {
-		background: linear-gradient(135deg, rgba(139, 0, 0, 0.3), rgba(0, 0, 0, 0.8));
-		border: 2px solid #8b0000;
-		color: #ffffff;
-		padding: 1.5rem;
-		border-radius: 15px;
-		text-align: center;
-		font-weight: 600;
-		font-family: 'Georgia', serif;
-		box-shadow: 0 0 25px rgba(139, 0, 0, 0.5);
-		animation: deathPulse 3s ease-in-out infinite;
-	}
-
-	.cult-message {
-		background: linear-gradient(135deg, rgba(25, 25, 112, 0.3), rgba(0, 0, 0, 0.8));
-		border: 2px solid #191970;
-		color: #d4d4d8;
-		padding: 1.5rem;
-		border-radius: 15px;
-		text-align: center;
-		font-style: italic;
-		font-family: 'Georgia', serif;
 	}
 
 	/* Horror Animations */
@@ -1271,19 +1000,6 @@
 
 	/* Mobile Responsive Design */
 	@media (max-width: 768px) {
-		.container {
-			padding: 1rem;
-		}
-
-		.game-logo h1 {
-			font-size: 2.5rem;
-		}
-
-		.game-logo h1::before,
-		.game-logo h1::after {
-			display: none;
-		}
-
 		.village-panel {
 			padding: 1.5rem;
 		}
@@ -1300,11 +1016,6 @@
 			min-height: 44px;
 		}
 
-		.lobby-actions {
-			flex-direction: column;
-			align-items: stretch;
-		}
-
 		.player-card {
 			padding: 1rem;
 		}
@@ -1314,19 +1025,10 @@
 			height: 40px;
 			font-size: 1rem;
 		}
-
-		.debug-info {
-			font-size: 0.8rem;
-			padding: 0.8rem;
-		}
 	}
 
 	/* Touch-friendly improvements for mobile */
 	@media (max-width: 480px) {
-		.game-logo h1 {
-			font-size: 2rem;
-		}
-
 		.village-panel {
 			padding: 1rem;
 		}
