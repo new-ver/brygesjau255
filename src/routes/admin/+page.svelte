@@ -2,6 +2,7 @@
   import { onMount, onDestroy } from 'svelte'
   import { goto } from '$app/navigation'
   import { supabase } from '$lib/supabase'
+	import type { RealtimeChannel } from '@supabase/supabase-js';
 
   interface GamePlayer {
     id: string
@@ -25,10 +26,10 @@
   let gameState: GameState | null = null
   let adminMessage = ''
   let isProcessing = false
-  let subscription: any
+  let subscription: RealtimeChannel | null = null
 
   // Game controls
-  let selectedPlayers: string[] = []
+  // let selectedPlayers: string[] = []
 
   async function loadGameData() {
   try {
@@ -56,9 +57,9 @@
 
     gameState = stateData ?? null
 
-  } catch (error: any) {
+  } catch (error: unknown) {
     console.error('Error loading game data:', error)
-    adminMessage = `Error loading data: ${error.message ?? 'Unknown error'}`
+    adminMessage = `Error loading data: ${error ?? 'Unknown error'}`
   }
 }
 
@@ -81,22 +82,22 @@
       adminMessage = 'Game started successfully! Roles have been assigned.'
       await loadGameData()
       
-    } catch (error: any) {
+    } catch (error: unknown) {
       console.error('Error starting game:', error)
-      adminMessage = `Error starting game: ${error.message}`
+      adminMessage = `Error starting game: ${error}`
     } finally {
       isProcessing = false
     }
   }
 
-    function handlePhaseNavigation() {
-    if (!gameState) return;
+  //   function handlePhaseNavigation() {
+  //   if (!gameState) return;
 
-    // Navigate on first phase transition
-    if (gameState.status === 'night' || gameState.status === 'day' || gameState.status === 'voting') {
-      goto('/game'); // Adjust if your board route is different
-    }
-  }
+  //   // Navigate on first phase transition
+  //   if (gameState.status === 'night' || gameState.status === 'day' || gameState.status === 'voting') {
+  //     goto('/game'); // Adjust if your board route is different
+  //   }
+  // }
 
 
   async function resetGame() {
@@ -115,9 +116,9 @@
       adminMessage = 'Game reset successfully!'
       await loadGameData()
       
-    } catch (error: any) {
+    } catch (error: unknown) {
       console.error('Error resetting game:', error)
-      adminMessage = `Error resetting game: ${error.message}`
+      adminMessage = `Error resetting game: ${error}`
     } finally {
       isProcessing = false
     }
@@ -139,9 +140,9 @@
       adminMessage = `${playerName} removed from game`
       await loadGameData()
       
-    } catch (error: any) {
+    } catch (error: unknown) {
       console.error('Error removing player:', error)
-      adminMessage = `Error removing player: ${error.message}`
+      adminMessage = `Error removing player: ${error}`
     }
   }
 
@@ -157,9 +158,9 @@
       adminMessage = `${playerName} is now ${!isAlive ? 'alive' : 'dead'}`
       await loadGameData()
       
-    } catch (error: any) {
+    } catch (error: unknown) {
       console.error('Error toggling player life:', error)
-      adminMessage = `Error: ${error.message}`
+      adminMessage = `Error: ${error}`
     }
   }
 
@@ -220,7 +221,7 @@
       </div>
 
       <nav class="admin-nav">
-        <button class="nav-btn secondary" on:click={() => goto('/game')}>
+        <button class="nav-btn secondary" on:click={() => goto('/whispers')}>
           ← Player Lobby
         </button>
         <button class="nav-btn secondary" on:click={() => goto('/')}>
@@ -333,7 +334,7 @@
         </div>
       {:else}
         <div class="players-grid">
-          {#each players as player}
+          {#each players as player (player.id)}
             <div class="player-card" class:dead={!player.is_alive}>
               <div class="player-header">
                 <div class="player-avatar" class:dead={!player.is_alive}>

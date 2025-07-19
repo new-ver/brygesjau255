@@ -1,303 +1,288 @@
 <script lang="ts">
-  import { onMount, onDestroy } from 'svelte'
-  import { goto } from '$app/navigation'
-  import { supabase } from '$lib/supabase'
+ import { onMount, onDestroy } from 'svelte'
+import { goto } from '$app/navigation'
+import { supabase } from '$lib/supabase'
+import type { RealtimeChannel } from '@supabase/supabase-js'
 
-  interface GamePlayer {
-    id: string
-    name: string
-    affiliation: 'cult' | 'townsfolk' | null
-    character: string | null
-    joined_at: string
-    is_alive: boolean
+interface GamePlayer {
+  id: string
+  name: string
+  affiliation: 'cult' | 'townsfolk' | null
+  character: string | null
+  joined_at: string
+  is_alive: boolean
+}
+
+interface GameState {
+  id: number
+  status: 'lobby' | 'night' | 'day' | 'voting' | 'finished'
+  current_phase: string
+  day_number: number
+  created_at: string
+  updated_at: string
+}
+
+let playerName = ''
+let players: GamePlayer[] = []
+let gameState: GameState | null = null
+let isJoining = false
+let joinMessage = ''
+let subscription: RealtimeChannel | null = null
+
+async function joinGame() {
+  console.log('🎮 Attempting to join game with name:', playerName)
+  
+  if (!playerName.trim()) {
+    joinMessage = 'Please enter your name'
+    return
   }
 
-  let playerName = ''
-  let players: GamePlayer[] = []
-  let isJoining = false
-  let joinMessage = ''
-  let gameStarted = false
+  // Check if name is already taken
+  if (players.some(p => p.name.toLowerCase() === playerName.toLowerCase())) {
+    joinMessage = 'This name is already taken'
+    return
+  }
 
-  // Supabase real-time subscription
-  let subscription: any
+  isJoining = true
+  joinMessage = ''
 
-  async function joinGame() {
-    console.log('🎮 Attempting to join game with name:', playerName)
+  try {
+    console.log('📡 Inserting player into database...')
+    const { data, error } = await supabase
+      .from('game_players')
+      .insert([{
+        name: playerName.trim(),
+        affiliation: null, // Will be assigned when admin starts game
+        character: null,
+        is_alive: true
+      }])
+      .select()
+
+    if (error) {
+      console.error('❌ Database error:', error)
+      throw error
+    }
+
+    console.log('✅ Player inserted successfully:', data)
+    joinMessage = `${data[0].name} joined the village!`
+    playerName = ''
     
-    if (!playerName.trim()) {
-      joinMessage = 'Please enter your name'
-      return
+    await loadGameData()
+    
+  } catch (error: unknown) {
+    console.error('💥 Join game error:', error)
+    joinMessage = `Error: ${error instanceof Error ? error.message : 'Unknown error'}`
+  } finally {
+    isJoining = false
+  }
+}
+
+async function loadGameData() {
+  console.log('📊 Loading game data...')
+  try {
+    // Load players
+    const { data: playersData, error: playersError } = await supabase
+      .from('game_players')
+      .select('*')
+      .order('joined_at', { ascending: true })
+
+    if (playersError) {
+      console.error('❌ Load players error:', playersError)
+      throw playersError
     }
 
-    // Check if name is already taken
-    if (players.some(p => p.name.toLowerCase() === playerName.toLowerCase())) {
-      joinMessage = 'This name is already taken'
-      return
-    }
+    console.log('📋 Players loaded:', playersData)
+    players = playersData || []
 
-    isJoining = true
-    joinMessage = ''
+    // Load game state
+    const { data: stateData, error: stateError } = await supabase
+      .from('game_state')
+      .select('*')
+      .single()
 
-    try {
-      console.log('📡 Inserting player into database...')
-      const { data, error } = await supabase
-        .from('game_players')
-        .insert([{
-          name: playerName.trim(),
-          affiliation: null, // Will be assigned when game starts
-          character: null,
-          is_alive: true
-        }])
-        .select()
-
-      if (error) {
-        console.error('❌ Database error:', error)
-        throw error
+    if (stateError) {
+      // Ignore "no rows" error - game hasn't started yet
+      if (stateError.code !== 'PGRST116' && !stateError.message.includes('Results contain 0 rows')) {
+        throw stateError
       }
-
-      console.log('✅ Player inserted successfully:', data)
-      joinMessage = `${data[0].name} joined the village!`
-      playerName = ''
-      
-      // Manually reload players to ensure we see the change
-      await loadPlayers()
-      
-    } catch (error: any) {
-      console.error('💥 Join game error:', error)
-      joinMessage = `Error: ${error.message}`
-    } finally {
-      isJoining = false
+      gameState = null
+    } else {
+      gameState = stateData
+      // Check if we should navigate to game board
+      checkForGameTransition()
     }
+
+  } catch (error) {
+    console.error('💥 Error loading game data:', error)
   }
+}
 
-  async function loadPlayers() {
-    console.log('📊 Loading players from database...')
-    try {
-      const { data, error } = await supabase
-        .from('game_players')
-        .select('*')
-        .order('joined_at', { ascending: true })
+function checkForGameTransition() {
+  // If game has started (status is no longer lobby), navigate to game board
+  if (gameState && gameState.status !== 'lobby') {
+    console.log('🎮 Game has started! Navigating to game board...')
+    goto('/whispers/game') // Adjust path as needed
+  }
+}
 
-      if (error) {
-        console.error('❌ Load players error:', error)
-        throw error
+onMount(() => {    
+  loadGameData()
+
+  // Set up real-time subscription for both players and game state
+  subscription = supabase
+    .channel('lobby_channel')
+    .on('postgres_changes', 
+      { event: '*', schema: 'public', table: 'game_players' },
+      () => {
+        console.log('🔄 Player data changed, reloading...')
+        loadGameData()
       }
+    )
+    .on('postgres_changes', 
+      { event: '*', schema: 'public', table: 'game_state' },
+      (payload) => {
+        console.log('🎮 Game state changed:', payload)
+        loadGameData() // This will trigger checkForGameTransition
+      }
+    )
+    .subscribe()
+})
 
-      console.log('📋 Players loaded:', data)
-      players = data || []
-      console.log('🎯 Players array updated, length:', players.length)
-    } catch (error) {
-      console.error('💥 Error loading players:', error)
-    }
+onDestroy(() => {    
+  if (subscription) {
+    supabase.removeChannel(subscription)
   }
-
-  async function clearLobby() {
-    try {
-      const { error } = await supabase
-        .from('game_players')
-        .delete()
-        .neq('id', '00000000-0000-0000-0000-000000000000') // Delete all
-
-      if (error) throw error
-      
-      players = []
-      joinMessage = 'Lobby cleared!'
-    } catch (error: any) {
-      joinMessage = `Error: ${error.message}`
-    }
-  }
-
-  async function startGame() {
-    if (players.length < 3) {
-      joinMessage = 'Need at least 3 players to start'
-      return
-    }
-
-    // TODO: Assign roles and characters
-    gameStarted = true
-    joinMessage = 'The darkness descends upon the village...'
-  }
-
-  onMount(() => {    
-    loadPlayers()
-
-    // Set up real-time subscription
-    subscription = supabase
-      .channel('game_players')
-      .on('postgres_changes', 
-        { event: '*', schema: 'public', table: 'game_players' },
-        () => {
-          loadPlayers()
-        }
-      )
-      .subscribe()
-  })
-
-  onDestroy(() => {    
-    if (subscription) {
-      supabase.removeChannel(subscription)
-    }
-  })
+})
 </script>
 
 <svelte:head>
   <title>Village of Shadows - Game Lobby</title>
 </svelte:head>
 
-<!-- Game Container with Isolated Styles -->
-<div class="game-container">
-  <!-- Blood Particles -->
-  <div class="blood-particles">
-    <div class="blood-drop"></div>
-    <div class="blood-drop"></div>
-    <div class="blood-drop"></div>
-    <div class="blood-drop"></div>
-    <div class="blood-drop"></div>
+<!-- Join Game Section -->
+<section class="village-panel join-game-section">
+  <h3>🏘️ Enter the Village</h3>
+  <p class="join-description">
+    State your name and join the survivors. Trust no one—the cult walks among you.
+  </p>
+  
+  <form on:submit|preventDefault={joinGame} class="join-form">
+    <div class="form-group">
+      <label for="name">Your Name</label>
+      <input
+        id="name"
+        type="text"
+        bind:value={playerName}
+        placeholder="Enter your name..."
+        required
+        class="dark-input"
+        disabled={isJoining}
+        maxlength="20"
+      />
+    </div>
+
+    <button 
+      type="submit" 
+      disabled={isJoining || !playerName.trim()} 
+      class="cult-button"
+      class:loading={isJoining}
+    >
+      {isJoining ? 'Entering Village...' : 'Join the Village'}
+    </button>
+
+    {#if joinMessage}
+      <div 
+        class="join-message" 
+        class:success={joinMessage.includes('joined')}
+        class:error={joinMessage.includes('Error') || joinMessage.includes('taken')}
+        class:info={joinMessage.includes('cleared')}
+      >
+        {joinMessage}
+      </div>
+    {/if}
+  </form>
+</section>
+
+<!-- Updated Villagers Gathered Section -->
+<section class="village-panel">
+  <div class="lobby-header">
+    <h3>👥 Villagers Gathered</h3>
+    <div class="player-counter">
+      <span class="count">{players.length}</span> souls in the village
+    </div>
   </div>
 
-  <main class="container">
-    <header>
-      <div class="game-logo">
-        <h1>VILLAGE OF SHADOWS</h1>
-        <div class="game-subtitle">The Cult Awakens</div>
-      </div>
-
-      <button class="back-btn" on:click={() => goto('/')}>
-        ← Return to Festival
-      </button>
-    </header>
-
-    <!-- Game Story Introduction -->
-    <section class="village-panel">
-      <h3>🌙 The Story Begins</h3>
-      <div class="story-text">
-        <p>
-          In a remote village, far from the reach of the outside world, something dark has begun to fester. 
-          For months, hushed rumors have spread of a secretive cult growing in numbers—villagers vanishing, 
-          only to return changed, eyes hollow and voices no longer their own.
-        </p>
-        <p>
-          At dawn, the villagers discover the lifeless body of their mailman sprawled by the dock—his throat slit, 
-          and the words <em>"Feel Her Love"</em> scrawled in blood across the planks.
-        </p>
-        <p class="cult-message">
-          The cult is no longer hiding. They've come to convert—or to kill.
-        </p>
-      </div>
-    </section>
-
-    {#if !gameStarted}
-      <!-- Join Game Section -->
-      <section class="village-panel">
-        <h3>🏘️ Enter the Village</h3>
-        <p class="join-description">
-          State your name and join the survivors. Trust no one—the cult walks among you.
-        </p>
-        
-        <form on:submit|preventDefault={joinGame} class="join-form">
-          <div class="form-group">
-            <label for="name">Your Name</label>
-            <input
-              id="name"
-              type="text"
-              bind:value={playerName}
-              placeholder="Enter your name..."
-              required
-              class="dark-input"
-              disabled={isJoining}
-            />
+  {#if players.length === 0}
+    <div class="empty-lobby">
+      <p>The village lies empty and silent...</p>
+      <p class="whisper">Waiting for brave souls to arrive...</p>
+    </div>
+  {:else}
+    <div class="players-grid">
+      {#each players as player (player.id)}
+        <div class="player-card">
+          <div class="player-avatar">
+            {player.name.charAt(0).toUpperCase()}
           </div>
-
-          <button type="submit" disabled={isJoining || !playerName.trim()} class="cult-button">
-            {isJoining ? 'Entering Village...' : 'Join the Village'}
-          </button>
-
-          {#if joinMessage}
-            <p class="message" 
-               class:death-message={joinMessage.includes('Error') || joinMessage.includes('taken')}
-               class:cult-message={joinMessage.includes('Success') || joinMessage.includes('cleared')}>
-              {joinMessage}
+          <div class="player-info">
+            <h4 class="player-name">{player.name}</h4>
+            <p class="join-time">
+              Arrived {new Date(player.joined_at).toLocaleTimeString()}
             </p>
-          {/if}
-        </form>
-      </section>
-
-      <!-- Players in Lobby -->
-      <section class="village-panel">
-        <div class="lobby-header">
-          <h3>👥 Villagers Gathered</h3>
-          <div class="player-counter">
-            <span class="count">{players.length}</span> souls in the village
-          </div>
-        </div>
-
-        <!-- Debug info -->
-        <div class="debug-info">
-          <p><strong>Debug:</strong> Players array length: {players.length}</p>
-          <p><strong>Loading state:</strong> {isJoining ? 'Joining...' : 'Ready'}</p>
-          <p><strong>Last message:</strong> {joinMessage || 'None'}</p>
-        </div>
-
-        {#if players.length === 0}
-          <div class="empty-lobby">
-            <p>The village lies empty and silent...</p>
-            <p class="whisper">Waiting for brave souls to arrive...</p>
-          </div>
-        {:else}
-          <div class="players-grid">
-            {#each players as player, i}
-              <div class="player-card">
-                <div class="player-avatar">
-                  {player.name.charAt(0).toUpperCase()}
-                </div>
-                <div class="player-info">
-                  <h4 class="player-name">{player.name}</h4>
-                  <p class="join-time">
-                    Arrived {new Date(player.joined_at).toLocaleTimeString()}
-                  </p>
-                </div>
-                <div class="player-status">
-                  <span class="status-dot alive"></span>
-                </div>
-              </div>
-            {/each}
-          </div>
-
-          <div class="lobby-actions">
-            {#if players.length >= 3}
-              <button class="cult-button start-btn" on:click={startGame}>
-                🌙 Begin the Night ({players.length} players)
-              </button>
-            {:else}
-              <p class="requirement-text">
-                Need {3 - players.length} more player{3 - players.length === 1 ? '' : 's'} to start
+            {#if player.affiliation}
+              <p class="player-role">
+                {player.affiliation} - {player.character || 'Role assigned'}
               </p>
             {/if}
-            
-            <button class="cult-button clear-btn" on:click={clearLobby}>
-              🧹 Clear Lobby
-            </button>
           </div>
-        {/if}
-      </section>
-    {:else}
-      <!-- Game Started -->
-      <section class="village-panel">
-        <div class="death-message">
-          <h3>The Game Begins...</h3>
-          <p>Roles are being assigned. The village holds its breath.</p>
+          <div class="player-status">
+            <span class="status-dot alive"></span>
+          </div>
         </div>
-      </section>
-    {/if}
-  </main>
-</div>
+      {/each}
+    </div>
 
+    <div class="lobby-status">
+      {#if gameState?.status === 'lobby'}
+        <div class="waiting-message">
+          <div class="status-indicator pulsing"></div>
+          <div>
+            <h4>Waiting for Storyteller</h4>
+            <p>The game master will begin when ready... ({players.length} players joined)</p>
+          </div>
+        </div>
+      {:else if !gameState}
+        <div class="waiting-message">
+          <div class="status-indicator pulsing"></div>
+          <div>
+            <h4>Lobby Open</h4>
+            <p>Gathering villagers... The storyteller will begin soon.</p>
+          </div>
+        </div>
+      {:else}
+        <div class="starting-message">
+          <div class="status-indicator starting"></div>
+          <div>
+            <h4>Game Starting!</h4>
+            <p>The storyteller has begun the tale. Roles are being assigned...</p>
+          </div>
+        </div>
+      {/if}
+      
+      <!-- Admin and utility buttons -->
+      <div style="display: flex; gap: 1rem; flex-wrap: wrap; justify-content: center; margin-top: 1rem;">
+        <button class="admin-link-btn" on:click={() => goto('/admin')}>
+          🎭 Storyteller Panel
+        </button>
+      </div>
+    </div>
+  {/if}
+</section>
 <style>
   /* ==========================================================================
      CULT VILLAGE HORROR GAME - COMPONENT SCOPED STYLES
      ========================================================================== */
 
-  /* Game Container - Isolates all game styles */
   .game-container {
     /* Reset any inherited floral styles */
     all: initial;
@@ -314,6 +299,324 @@
     color: #d4d4d8;
     box-sizing: border-box;
   }
+
+  /* Add these styles to your existing lobby CSS */
+
+/* Join Game Section */
+.join-game-section {
+  margin-bottom: 2rem;
+}
+
+.join-form {
+  display: flex;
+  flex-direction: column;
+  gap: 1rem;
+  max-width: 400px;
+  margin: 0 auto;
+}
+
+.form-group {
+  margin-bottom: 1.5rem;
+}
+
+.form-group label {
+  display: block;
+  margin-bottom: 0.5rem;
+  color: #d4d4d8;
+  font-family: 'Georgia', serif;
+  font-weight: 600;
+  background: none;
+  -webkit-background-clip: unset;
+  -webkit-text-fill-color: unset;
+}
+
+.dark-input {
+  background: 
+    linear-gradient(135deg, rgba(0, 0, 0, 0.6), rgba(20, 20, 40, 0.8));
+  border: 2px solid rgba(139, 0, 0, 0.3);
+  color: #d4d4d8;
+  padding: 1rem;
+  border-radius: 10px;
+  font-family: 'Georgia', serif;
+  transition: all 0.3s ease;
+  width: 100%;
+  font-size: 1rem;
+  animation: none;
+  box-shadow: none;
+}
+
+.dark-input:focus {
+  outline: none;
+  border-color: #8b0000;
+  box-shadow: 0 0 15px rgba(139, 0, 0, 0.4);
+  background: linear-gradient(135deg, rgba(139, 0, 0, 0.1), rgba(20, 20, 40, 0.9));
+}
+
+.dark-input::placeholder {
+  color: #8b8680;
+}
+
+.dark-input:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
+}
+
+/* Lobby Status Section */
+.lobby-status {
+  margin-top: 2rem;
+  display: flex;
+  flex-direction: column;
+  gap: 1rem;
+  align-items: center;
+}
+
+.waiting-message, .starting-message {
+  display: flex;
+  align-items: center;
+  gap: 1rem;
+  padding: 1.5rem;
+  border-radius: 15px;
+  text-align: left;
+  width: 100%;
+  max-width: 500px;
+}
+
+.waiting-message {
+  background: linear-gradient(135deg, rgba(25, 25, 112, 0.2), rgba(0, 0, 0, 0.6));
+  border: 2px solid rgba(25, 25, 112, 0.4);
+  color: #d4d4d8;
+}
+
+.starting-message {
+  background: linear-gradient(135deg, rgba(139, 0, 0, 0.3), rgba(0, 0, 0, 0.8));
+  border: 2px solid #8b0000;
+  color: #ffffff;
+  animation: deathPulse 3s ease-in-out infinite;
+}
+
+.status-indicator {
+  width: 16px;
+  height: 16px;
+  border-radius: 50%;
+  flex-shrink: 0;
+}
+
+.status-indicator.pulsing {
+  background: #191970;
+  animation: statusPulse 2s ease-in-out infinite;
+}
+
+.status-indicator.starting {
+  background: #8b0000;
+  animation: bloodPulse 1.5s ease-in-out infinite;
+}
+
+.waiting-message h4, .starting-message h4 {
+  margin: 0 0 0.5rem 0;
+  font-family: 'Georgia', serif;
+  font-size: 1.2rem;
+  font-weight: 600;
+}
+
+.waiting-message p, .starting-message p {
+  margin: 0;
+  opacity: 0.9;
+  font-style: italic;
+}
+
+.admin-link-btn {
+  background: linear-gradient(135deg, rgba(139, 0, 0, 0.1), rgba(25, 25, 112, 0.1));
+  border: 1px solid rgba(139, 0, 0, 0.3);
+  color: #8b8680;
+  padding: 0.8rem 1.5rem;
+  border-radius: 10px;
+  cursor: pointer;
+  transition: all 0.3s ease;
+  font-family: 'Georgia', serif;
+  font-size: 0.9rem;
+  text-decoration: none;
+  display: inline-block;
+  margin-top: 1rem;
+}
+
+.admin-link-btn:hover {
+  background: linear-gradient(135deg, rgba(139, 0, 0, 0.2), rgba(25, 25, 112, 0.2));
+  border-color: #8b0000;
+  color: #d4d4d8;
+  transform: translateY(-1px);
+}
+
+.player-role {
+  font-size: 0.8rem;
+  color: #8b8680;
+  margin: 0.25rem 0 0 0;
+  font-style: italic;
+}
+
+/* Clear Lobby Button */
+.clear-lobby-btn {
+  background: linear-gradient(135deg, rgba(107, 114, 128, 0.2), rgba(75, 85, 99, 0.15));
+  border: 2px solid rgba(107, 114, 128, 0.4);
+  color: #9ca3af;
+  padding: 0.8rem 1.5rem;
+  border-radius: 10px;
+  cursor: pointer;
+  transition: all 0.3s ease;
+  font-family: 'Georgia', serif;
+  font-size: 0.9rem;
+  margin-top: 1rem;
+}
+
+.clear-lobby-btn:hover {
+  background: linear-gradient(135deg, rgba(107, 114, 128, 0.4), rgba(75, 85, 99, 0.3));
+  border-color: #6b7280;
+  color: #f3f4f6;
+  transform: translateY(-1px);
+}
+
+/* Message Display */
+.join-message {
+  margin-top: 1rem;
+  padding: 1rem;
+  border-radius: 10px;
+  text-align: center;
+  font-weight: 600;
+  font-family: 'Georgia', serif;
+}
+
+.join-message.success {
+  background: linear-gradient(135deg, rgba(5, 150, 105, 0.2), rgba(0, 0, 0, 0.6));
+  border: 2px solid rgba(5, 150, 105, 0.4);
+  color: #10b981;
+}
+
+.join-message.error {
+  background: linear-gradient(135deg, rgba(239, 68, 68, 0.2), rgba(0, 0, 0, 0.6));
+  border: 2px solid rgba(239, 68, 68, 0.4);
+  color: #ef4444;
+}
+
+.join-message.info {
+  background: linear-gradient(135deg, rgba(59, 130, 246, 0.2), rgba(0, 0, 0, 0.6));
+  border: 2px solid rgba(59, 130, 246, 0.4);
+  color: #60a5fa;
+}
+
+/* Enhanced animations */
+@keyframes statusPulse {
+  0%, 100% { 
+    opacity: 1; 
+    transform: scale(1);
+  }
+  50% { 
+    opacity: 0.6; 
+    transform: scale(1.1);
+  }
+}
+
+@keyframes bloodPulse {
+  0%, 100% { 
+    opacity: 1; 
+    transform: scale(1);
+    background: #8b0000;
+  }
+  50% { 
+    opacity: 0.8; 
+    transform: scale(1.2);
+    background: #ff0000;
+  }
+}
+
+/* Loading state for join button */
+.cult-button.loading {
+  pointer-events: none;
+  opacity: 0.7;
+  position: relative;
+}
+
+.cult-button.loading::after {
+  content: '';
+  position: absolute;
+  right: 1rem;
+  top: 50%;
+  transform: translateY(-50%);
+  width: 16px;
+  height: 16px;
+  border: 2px solid transparent;
+  border-top: 2px solid currentColor;
+  border-radius: 50%;
+  animation: spin 1s linear infinite;
+}
+
+@keyframes spin {
+  0% { transform: translateY(-50%) rotate(0deg); }
+  100% { transform: translateY(-50%) rotate(360deg); }
+}
+
+/* Mobile responsive adjustments */
+@media (max-width: 768px) {
+  .waiting-message, .starting-message {
+    padding: 1rem;
+    flex-direction: column;
+    text-align: center;
+    gap: 0.75rem;
+  }
+  
+  .status-indicator {
+    width: 20px;
+    height: 20px;
+  }
+  
+  .lobby-status {
+    margin-top: 1.5rem;
+  }
+  
+  .admin-link-btn, .clear-lobby-btn {
+    width: 100%;
+    text-align: center;
+  }
+  
+  .join-form {
+    max-width: 100%;
+  }
+  
+  .cult-button {
+    width: 100%;
+  }
+}
+
+@media (max-width: 480px) {
+  .join-form {
+    gap: 0.75rem;
+  }
+  
+  .form-group {
+    margin-bottom: 1rem;
+  }
+  
+  .dark-input {
+    padding: 0.8rem;
+    font-size: 16px; /* Prevents zoom on iOS */
+  }
+  
+  .cult-button {
+    padding: 1rem;
+    font-size: 0.9rem;
+  }
+  
+  .waiting-message h4, .starting-message h4 {
+    font-size: 1.1rem;
+  }
+  
+  .waiting-message p, .starting-message p {
+    font-size: 0.9rem;
+  }
+  
+  .admin-link-btn, .clear-lobby-btn {
+    padding: 0.7rem 1.2rem;
+    font-size: 0.85rem;
+  }
+}
 
   /* Ensure all child elements use border-box */
   .game-container *,

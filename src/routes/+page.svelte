@@ -43,8 +43,8 @@
 
       // Refresh the list
       await loadRSVPs()
-    } catch (error: any) {
-      submitMessage = `Error: ${error.message}`
+    } catch (error: unknown) {
+      submitMessage = `Error: ${error}`
     } finally {
       isSubmitting = false
     }
@@ -224,7 +224,7 @@
     <h3>The plot thickens</h3>
     <div class="carousel-container">
       <div class="carousel" bind:this={carousel}>
-        {#each rsvps.filter(r => r.attending) as rsvp, i}
+       {#each rsvps.filter(r => r.attending) as rsvp, i (rsvp.id)}
           <div class="attendee-card" style="--index: {i}">
             <div class="card-inner">
               <div class="avatar">
