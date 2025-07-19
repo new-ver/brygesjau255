@@ -1,1267 +1,1343 @@
 <script lang="ts">
- import { onMount, onDestroy } from 'svelte'
-import { goto } from '$app/navigation'
-import { supabase } from '$lib/supabase'
-import type { RealtimeChannel } from '@supabase/supabase-js'
+	import { onMount, onDestroy } from 'svelte';
+	import { goto } from '$app/navigation';
+	import { supabase } from '$lib/supabase';
+	import type { RealtimeChannel } from '@supabase/supabase-js';
 
-interface GamePlayer {
-  id: string
-  name: string
-  affiliation: 'cult' | 'townsfolk' | null
-  character: string | null
-  joined_at: string
-  is_alive: boolean
-}
+	interface GamePlayer {
+		id: string;
+		name: string;
+		affiliation: 'cult' | 'townsfolk' | null;
+		character: string | null;
+		joined_at: string;
+		is_alive: boolean;
+	}
 
-interface GameState {
-  id: number
-  status: 'lobby' | 'night' | 'day' | 'voting' | 'finished'
-  current_phase: string
-  day_number: number
-  created_at: string
-  updated_at: string
-}
+	interface GameState {
+		id: number;
+		status: 'lobby' | 'night' | 'day' | 'voting' | 'finished';
+		current_phase: string;
+		day_number: number;
+		created_at: string;
+		updated_at: string;
+	}
 
-let playerName = ''
-let players: GamePlayer[] = []
-let gameState: GameState | null = null
-let isJoining = false
-let joinMessage = ''
-let subscription: RealtimeChannel | null = null
+	let playerName = '';
+	let players: GamePlayer[] = [];
+	let gameState: GameState | null = null;
+	let isJoining = false;
+	let joinMessage = '';
+	let subscription: RealtimeChannel | null = null;
 
-async function joinGame() {
-  console.log('🎮 Attempting to join game with name:', playerName)
-  
-  if (!playerName.trim()) {
-    joinMessage = 'Please enter your name'
-    return
-  }
+	async function joinGame() {
+		console.log('🎮 Attempting to join game with name:', playerName);
 
-  // Check if name is already taken
-  if (players.some(p => p.name.toLowerCase() === playerName.toLowerCase())) {
-    joinMessage = 'This name is already taken'
-    return
-  }
+		if (!playerName.trim()) {
+			joinMessage = 'Please enter your name';
+			return;
+		}
 
-  isJoining = true
-  joinMessage = ''
+		// Check if name is already taken
+		if (players.some((p) => p.name.toLowerCase() === playerName.toLowerCase())) {
+			joinMessage = 'This name is already taken';
+			return;
+		}
 
-  try {
-    console.log('📡 Inserting player into database...')
-    const { data, error } = await supabase
-      .from('game_players')
-      .insert([{
-        name: playerName.trim(),
-        affiliation: null, // Will be assigned when admin starts game
-        character: null,
-        is_alive: true
-      }])
-      .select()
+		isJoining = true;
+		joinMessage = '';
 
-    if (error) {
-      console.error('❌ Database error:', error)
-      throw error
-    }
+		try {
+			console.log('📡 Inserting player into database...');
+			const { data, error } = await supabase
+				.from('game_players')
+				.insert([
+					{
+						name: playerName.trim(),
+						affiliation: null, // Will be assigned when admin starts game
+						character: null,
+						is_alive: true
+					}
+				])
+				.select();
 
-    console.log('✅ Player inserted successfully:', data)
-    joinMessage = `${data[0].name} joined the village!`
-    playerName = ''
-    
-    await loadGameData()
-    
-  } catch (error: unknown) {
-    console.error('💥 Join game error:', error)
-    joinMessage = `Error: ${error instanceof Error ? error.message : 'Unknown error'}`
-  } finally {
-    isJoining = false
-  }
-}
+			if (error) {
+				console.error('❌ Database error:', error);
+				throw error;
+			}
 
-async function loadGameData() {
-  console.log('📊 Loading game data...')
-  try {
-    // Load players
-    const { data: playersData, error: playersError } = await supabase
-      .from('game_players')
-      .select('*')
-      .order('joined_at', { ascending: true })
+			console.log('✅ Player inserted successfully:', data);
+			joinMessage = `${data[0].name} joined the village!`;
+			playerName = '';
 
-    if (playersError) {
-      console.error('❌ Load players error:', playersError)
-      throw playersError
-    }
+			await loadGameData();
+		} catch (error: unknown) {
+			console.error('💥 Join game error:', error);
+			joinMessage = `Error: ${error instanceof Error ? error.message : 'Unknown error'}`;
+		} finally {
+			isJoining = false;
+		}
+	}
 
-    console.log('📋 Players loaded:', playersData)
-    players = playersData || []
+	async function loadGameData() {
+		console.log('📊 Loading game data...');
+		try {
+			// Load players
+			const { data: playersData, error: playersError } = await supabase
+				.from('game_players')
+				.select('*')
+				.order('joined_at', { ascending: true });
 
-    // Load game state
-    const { data: stateData, error: stateError } = await supabase
-      .from('game_state')
-      .select('*')
-      .single()
+			if (playersError) {
+				console.error('❌ Load players error:', playersError);
+				throw playersError;
+			}
 
-    if (stateError) {
-      // Ignore "no rows" error - game hasn't started yet
-      if (stateError.code !== 'PGRST116' && !stateError.message.includes('Results contain 0 rows')) {
-        throw stateError
-      }
-      gameState = null
-    } else {
-      gameState = stateData
-      // Check if we should navigate to game board
-      checkForGameTransition()
-    }
+			console.log('📋 Players loaded:', playersData);
+			players = playersData || [];
 
-  } catch (error) {
-    console.error('💥 Error loading game data:', error)
-  }
-}
+			// Load game state
+			const { data: stateData, error: stateError } = await supabase
+				.from('game_state')
+				.select('*')
+				.single();
 
-function checkForGameTransition() {
-  // If game has started (status is no longer lobby), navigate to game board
-  if (gameState && gameState.status !== 'lobby') {
-    console.log('🎮 Game has started! Navigating to game board...')
-    goto('/whispers/game') // Adjust path as needed
-  }
-}
+			if (stateError) {
+				// Ignore "no rows" error - game hasn't started yet
+				if (
+					stateError.code !== 'PGRST116' &&
+					!stateError.message.includes('Results contain 0 rows')
+				) {
+					throw stateError;
+				}
+				gameState = null;
+			} else {
+				gameState = stateData;
+				// Check if we should navigate to game board
+				checkForGameTransition();
+			}
+		} catch (error) {
+			console.error('💥 Error loading game data:', error);
+		}
+	}
 
-onMount(() => {    
-  loadGameData()
+	function checkForGameTransition() {
+		// If game has started (status is no longer lobby), navigate to game board
+		if (gameState && gameState.status !== 'lobby') {
+			console.log('🎮 Game has started! Navigating to game board...');
+			goto('/whispers/game'); // Adjust path as needed
+		}
+	}
 
-  // Set up real-time subscription for both players and game state
-  subscription = supabase
-    .channel('lobby_channel')
-    .on('postgres_changes', 
-      { event: '*', schema: 'public', table: 'game_players' },
-      () => {
-        console.log('🔄 Player data changed, reloading...')
-        loadGameData()
-      }
-    )
-    .on('postgres_changes', 
-      { event: '*', schema: 'public', table: 'game_state' },
-      (payload) => {
-        console.log('🎮 Game state changed:', payload)
-        loadGameData() // This will trigger checkForGameTransition
-      }
-    )
-    .subscribe()
-})
+	onMount(() => {
+		loadGameData();
 
-onDestroy(() => {    
-  if (subscription) {
-    supabase.removeChannel(subscription)
-  }
-})
+		// Set up real-time subscription for both players and game state
+		subscription = supabase
+			.channel('lobby_channel')
+			.on('postgres_changes', { event: '*', schema: 'public', table: 'game_players' }, () => {
+				console.log('🔄 Player data changed, reloading...');
+				loadGameData();
+			})
+			.on('postgres_changes', { event: '*', schema: 'public', table: 'game_state' }, (payload) => {
+				console.log('🎮 Game state changed:', payload);
+				loadGameData(); // This will trigger checkForGameTransition
+			})
+			.subscribe();
+	});
+
+	onDestroy(() => {
+		if (subscription) {
+			supabase.removeChannel(subscription);
+		}
+	});
 </script>
 
 <svelte:head>
-  <title>Village of Shadows - Game Lobby</title>
+	<title>Village of Shadows - Game Lobby</title>
 </svelte:head>
 
 <!-- Join Game Section -->
 <section class="village-panel join-game-section">
-  <h3>🏘️ Enter the Village</h3>
-  <p class="join-description">
-    State your name and join the survivors. Trust no one—the cult walks among you.
-  </p>
-  
-  <form on:submit|preventDefault={joinGame} class="join-form">
-    <div class="form-group">
-      <label for="name">Your Name</label>
-      <input
-        id="name"
-        type="text"
-        bind:value={playerName}
-        placeholder="Enter your name..."
-        required
-        class="dark-input"
-        disabled={isJoining}
-        maxlength="20"
-      />
-    </div>
+	<h3>🏘️ Enter the Village</h3>
+	<p class="join-description">
+		State your name and join the survivors. Trust no one—the cult walks among you.
+	</p>
 
-    <button 
-      type="submit" 
-      disabled={isJoining || !playerName.trim()} 
-      class="cult-button"
-      class:loading={isJoining}
-    >
-      {isJoining ? 'Entering Village...' : 'Join the Village'}
-    </button>
+	<form on:submit|preventDefault={joinGame} class="join-form">
+		<div class="form-group">
+			<label for="name">Your Name</label>
+			<input
+				id="name"
+				type="text"
+				bind:value={playerName}
+				placeholder="Enter your name..."
+				required
+				class="dark-input"
+				disabled={isJoining}
+				maxlength="20"
+			/>
+		</div>
 
-    {#if joinMessage}
-      <div 
-        class="join-message" 
-        class:success={joinMessage.includes('joined')}
-        class:error={joinMessage.includes('Error') || joinMessage.includes('taken')}
-        class:info={joinMessage.includes('cleared')}
-      >
-        {joinMessage}
-      </div>
-    {/if}
-  </form>
+		<button
+			type="submit"
+			disabled={isJoining || !playerName.trim()}
+			class="cult-button"
+			class:loading={isJoining}
+		>
+			{isJoining ? 'Entering Village...' : 'Join the Village'}
+		</button>
+
+		{#if joinMessage}
+			<div
+				class="join-message"
+				class:success={joinMessage.includes('joined')}
+				class:error={joinMessage.includes('Error') || joinMessage.includes('taken')}
+				class:info={joinMessage.includes('cleared')}
+			>
+				{joinMessage}
+			</div>
+		{/if}
+	</form>
 </section>
 
 <!-- Updated Villagers Gathered Section -->
 <section class="village-panel">
-  <div class="lobby-header">
-    <h3>👥 Villagers Gathered</h3>
-    <div class="player-counter">
-      <span class="count">{players.length}</span> souls in the village
-    </div>
-  </div>
+	<div class="lobby-header">
+		<h3>👥 Villagers Gathered</h3>
+		<div class="player-counter">
+			<span class="count">{players.length}</span> souls in the village
+		</div>
+	</div>
 
-  {#if players.length === 0}
-    <div class="empty-lobby">
-      <p>The village lies empty and silent...</p>
-      <p class="whisper">Waiting for brave souls to arrive...</p>
-    </div>
-  {:else}
-    <div class="players-grid">
-      {#each players as player (player.id)}
-        <div class="player-card">
-          <div class="player-avatar">
-            {player.name.charAt(0).toUpperCase()}
-          </div>
-          <div class="player-info">
-            <h4 class="player-name">{player.name}</h4>
-            <p class="join-time">
-              Arrived {new Date(player.joined_at).toLocaleTimeString()}
-            </p>
-            {#if player.affiliation}
-              <p class="player-role">
-                {player.affiliation} - {player.character || 'Role assigned'}
-              </p>
-            {/if}
-          </div>
-          <div class="player-status">
-            <span class="status-dot alive"></span>
-          </div>
-        </div>
-      {/each}
-    </div>
+	{#if players.length === 0}
+		<div class="empty-lobby">
+			<p>The village lies empty and silent...</p>
+			<p class="whisper">Waiting for brave souls to arrive...</p>
+		</div>
+	{:else}
+		<div class="players-grid">
+			{#each players as player (player.id)}
+				<div class="player-card">
+					<div class="player-avatar">
+						{player.name.charAt(0).toUpperCase()}
+					</div>
+					<div class="player-info">
+						<h4 class="player-name">{player.name}</h4>
+						<p class="join-time">
+							Arrived {new Date(player.joined_at).toLocaleTimeString()}
+						</p>
+						{#if player.affiliation}
+							<p class="player-role">
+								{player.affiliation} - {player.character || 'Role assigned'}
+							</p>
+						{/if}
+					</div>
+					<div class="player-status">
+						<span class="status-dot alive"></span>
+					</div>
+				</div>
+			{/each}
+		</div>
 
-    <div class="lobby-status">
-      {#if gameState?.status === 'lobby'}
-        <div class="waiting-message">
-          <div class="status-indicator pulsing"></div>
-          <div>
-            <h4>Waiting for Storyteller</h4>
-            <p>The game master will begin when ready... ({players.length} players joined)</p>
-          </div>
-        </div>
-      {:else if !gameState}
-        <div class="waiting-message">
-          <div class="status-indicator pulsing"></div>
-          <div>
-            <h4>Lobby Open</h4>
-            <p>Gathering villagers... The storyteller will begin soon.</p>
-          </div>
-        </div>
-      {:else}
-        <div class="starting-message">
-          <div class="status-indicator starting"></div>
-          <div>
-            <h4>Game Starting!</h4>
-            <p>The storyteller has begun the tale. Roles are being assigned...</p>
-          </div>
-        </div>
-      {/if}
-      
-      <!-- Admin and utility buttons -->
-      <div style="display: flex; gap: 1rem; flex-wrap: wrap; justify-content: center; margin-top: 1rem;">
-        <button class="admin-link-btn" on:click={() => goto('/admin')}>
-          🎭 Storyteller Panel
-        </button>
-      </div>
-    </div>
-  {/if}
+		<div class="lobby-status">
+			{#if gameState?.status === 'lobby'}
+				<div class="waiting-message">
+					<div class="status-indicator pulsing"></div>
+					<div>
+						<h4>Waiting for Storyteller</h4>
+						<p>The game master will begin when ready... ({players.length} players joined)</p>
+					</div>
+				</div>
+			{:else if !gameState}
+				<div class="waiting-message">
+					<div class="status-indicator pulsing"></div>
+					<div>
+						<h4>Lobby Open</h4>
+						<p>Gathering villagers... The storyteller will begin soon.</p>
+					</div>
+				</div>
+			{:else}
+				<div class="starting-message">
+					<div class="status-indicator starting"></div>
+					<div>
+						<h4>Game Starting!</h4>
+						<p>The storyteller has begun the tale. Roles are being assigned...</p>
+					</div>
+				</div>
+			{/if}
+
+			<!-- Admin and utility buttons -->
+			<div
+				style="display: flex; gap: 1rem; flex-wrap: wrap; justify-content: center; margin-top: 1rem;"
+			>
+				<button class="admin-link-btn" on:click={() => goto('/admin')}>
+					🎭 Storyteller Panel
+				</button>
+			</div>
+		</div>
+	{/if}
 </section>
+
 <style>
-  /* ==========================================================================
+	/* ==========================================================================
      CULT VILLAGE HORROR GAME - COMPONENT SCOPED STYLES
      ========================================================================== */
 
-  .game-container {
-    /* Reset any inherited floral styles */
-    all: initial;
-    display: block;
-    
-    /* Dark Village Atmosphere */
-    background: 
-      radial-gradient(ellipse at top, #1a1a2e 0%, #16213e 30%, #0f0f23 60%, #000000 100%),
-      linear-gradient(180deg, #0a0a0f 0%, #1a1320 40%, #2d1b2e 70%, #000000 100%);
-    min-height: 100vh;
-    position: relative;
-    overflow-x: hidden;
-    font-family: 'Georgia', 'Times New Roman', serif;
-    color: #d4d4d8;
-    box-sizing: border-box;
-  }
-
-  /* Add these styles to your existing lobby CSS */
-
-/* Join Game Section */
-.join-game-section {
-  margin-bottom: 2rem;
-}
-
-.join-form {
-  display: flex;
-  flex-direction: column;
-  gap: 1rem;
-  max-width: 400px;
-  margin: 0 auto;
-}
-
-.form-group {
-  margin-bottom: 1.5rem;
-}
-
-.form-group label {
-  display: block;
-  margin-bottom: 0.5rem;
-  color: #d4d4d8;
-  font-family: 'Georgia', serif;
-  font-weight: 600;
-  background: none;
-  -webkit-background-clip: unset;
-  -webkit-text-fill-color: unset;
-}
-
-.dark-input {
-  background: 
-    linear-gradient(135deg, rgba(0, 0, 0, 0.6), rgba(20, 20, 40, 0.8));
-  border: 2px solid rgba(139, 0, 0, 0.3);
-  color: #d4d4d8;
-  padding: 1rem;
-  border-radius: 10px;
-  font-family: 'Georgia', serif;
-  transition: all 0.3s ease;
-  width: 100%;
-  font-size: 1rem;
-  animation: none;
-  box-shadow: none;
-}
-
-.dark-input:focus {
-  outline: none;
-  border-color: #8b0000;
-  box-shadow: 0 0 15px rgba(139, 0, 0, 0.4);
-  background: linear-gradient(135deg, rgba(139, 0, 0, 0.1), rgba(20, 20, 40, 0.9));
-}
-
-.dark-input::placeholder {
-  color: #8b8680;
-}
-
-.dark-input:disabled {
-  opacity: 0.6;
-  cursor: not-allowed;
-}
-
-/* Lobby Status Section */
-.lobby-status {
-  margin-top: 2rem;
-  display: flex;
-  flex-direction: column;
-  gap: 1rem;
-  align-items: center;
-}
-
-.waiting-message, .starting-message {
-  display: flex;
-  align-items: center;
-  gap: 1rem;
-  padding: 1.5rem;
-  border-radius: 15px;
-  text-align: left;
-  width: 100%;
-  max-width: 500px;
-}
-
-.waiting-message {
-  background: linear-gradient(135deg, rgba(25, 25, 112, 0.2), rgba(0, 0, 0, 0.6));
-  border: 2px solid rgba(25, 25, 112, 0.4);
-  color: #d4d4d8;
-}
-
-.starting-message {
-  background: linear-gradient(135deg, rgba(139, 0, 0, 0.3), rgba(0, 0, 0, 0.8));
-  border: 2px solid #8b0000;
-  color: #ffffff;
-  animation: deathPulse 3s ease-in-out infinite;
-}
-
-.status-indicator {
-  width: 16px;
-  height: 16px;
-  border-radius: 50%;
-  flex-shrink: 0;
-}
-
-.status-indicator.pulsing {
-  background: #191970;
-  animation: statusPulse 2s ease-in-out infinite;
-}
-
-.status-indicator.starting {
-  background: #8b0000;
-  animation: bloodPulse 1.5s ease-in-out infinite;
-}
-
-.waiting-message h4, .starting-message h4 {
-  margin: 0 0 0.5rem 0;
-  font-family: 'Georgia', serif;
-  font-size: 1.2rem;
-  font-weight: 600;
-}
-
-.waiting-message p, .starting-message p {
-  margin: 0;
-  opacity: 0.9;
-  font-style: italic;
-}
-
-.admin-link-btn {
-  background: linear-gradient(135deg, rgba(139, 0, 0, 0.1), rgba(25, 25, 112, 0.1));
-  border: 1px solid rgba(139, 0, 0, 0.3);
-  color: #8b8680;
-  padding: 0.8rem 1.5rem;
-  border-radius: 10px;
-  cursor: pointer;
-  transition: all 0.3s ease;
-  font-family: 'Georgia', serif;
-  font-size: 0.9rem;
-  text-decoration: none;
-  display: inline-block;
-  margin-top: 1rem;
-}
-
-.admin-link-btn:hover {
-  background: linear-gradient(135deg, rgba(139, 0, 0, 0.2), rgba(25, 25, 112, 0.2));
-  border-color: #8b0000;
-  color: #d4d4d8;
-  transform: translateY(-1px);
-}
-
-.player-role {
-  font-size: 0.8rem;
-  color: #8b8680;
-  margin: 0.25rem 0 0 0;
-  font-style: italic;
-}
-
-/* Clear Lobby Button */
-.clear-lobby-btn {
-  background: linear-gradient(135deg, rgba(107, 114, 128, 0.2), rgba(75, 85, 99, 0.15));
-  border: 2px solid rgba(107, 114, 128, 0.4);
-  color: #9ca3af;
-  padding: 0.8rem 1.5rem;
-  border-radius: 10px;
-  cursor: pointer;
-  transition: all 0.3s ease;
-  font-family: 'Georgia', serif;
-  font-size: 0.9rem;
-  margin-top: 1rem;
-}
-
-.clear-lobby-btn:hover {
-  background: linear-gradient(135deg, rgba(107, 114, 128, 0.4), rgba(75, 85, 99, 0.3));
-  border-color: #6b7280;
-  color: #f3f4f6;
-  transform: translateY(-1px);
-}
-
-/* Message Display */
-.join-message {
-  margin-top: 1rem;
-  padding: 1rem;
-  border-radius: 10px;
-  text-align: center;
-  font-weight: 600;
-  font-family: 'Georgia', serif;
-}
-
-.join-message.success {
-  background: linear-gradient(135deg, rgba(5, 150, 105, 0.2), rgba(0, 0, 0, 0.6));
-  border: 2px solid rgba(5, 150, 105, 0.4);
-  color: #10b981;
-}
-
-.join-message.error {
-  background: linear-gradient(135deg, rgba(239, 68, 68, 0.2), rgba(0, 0, 0, 0.6));
-  border: 2px solid rgba(239, 68, 68, 0.4);
-  color: #ef4444;
-}
-
-.join-message.info {
-  background: linear-gradient(135deg, rgba(59, 130, 246, 0.2), rgba(0, 0, 0, 0.6));
-  border: 2px solid rgba(59, 130, 246, 0.4);
-  color: #60a5fa;
-}
-
-/* Enhanced animations */
-@keyframes statusPulse {
-  0%, 100% { 
-    opacity: 1; 
-    transform: scale(1);
-  }
-  50% { 
-    opacity: 0.6; 
-    transform: scale(1.1);
-  }
-}
-
-@keyframes bloodPulse {
-  0%, 100% { 
-    opacity: 1; 
-    transform: scale(1);
-    background: #8b0000;
-  }
-  50% { 
-    opacity: 0.8; 
-    transform: scale(1.2);
-    background: #ff0000;
-  }
-}
-
-/* Loading state for join button */
-.cult-button.loading {
-  pointer-events: none;
-  opacity: 0.7;
-  position: relative;
-}
-
-.cult-button.loading::after {
-  content: '';
-  position: absolute;
-  right: 1rem;
-  top: 50%;
-  transform: translateY(-50%);
-  width: 16px;
-  height: 16px;
-  border: 2px solid transparent;
-  border-top: 2px solid currentColor;
-  border-radius: 50%;
-  animation: spin 1s linear infinite;
-}
-
-@keyframes spin {
-  0% { transform: translateY(-50%) rotate(0deg); }
-  100% { transform: translateY(-50%) rotate(360deg); }
-}
-
-/* Mobile responsive adjustments */
-@media (max-width: 768px) {
-  .waiting-message, .starting-message {
-    padding: 1rem;
-    flex-direction: column;
-    text-align: center;
-    gap: 0.75rem;
-  }
-  
-  .status-indicator {
-    width: 20px;
-    height: 20px;
-  }
-  
-  .lobby-status {
-    margin-top: 1.5rem;
-  }
-  
-  .admin-link-btn, .clear-lobby-btn {
-    width: 100%;
-    text-align: center;
-  }
-  
-  .join-form {
-    max-width: 100%;
-  }
-  
-  .cult-button {
-    width: 100%;
-  }
-}
-
-@media (max-width: 480px) {
-  .join-form {
-    gap: 0.75rem;
-  }
-  
-  .form-group {
-    margin-bottom: 1rem;
-  }
-  
-  .dark-input {
-    padding: 0.8rem;
-    font-size: 16px; /* Prevents zoom on iOS */
-  }
-  
-  .cult-button {
-    padding: 1rem;
-    font-size: 0.9rem;
-  }
-  
-  .waiting-message h4, .starting-message h4 {
-    font-size: 1.1rem;
-  }
-  
-  .waiting-message p, .starting-message p {
-    font-size: 0.9rem;
-  }
-  
-  .admin-link-btn, .clear-lobby-btn {
-    padding: 0.7rem 1.2rem;
-    font-size: 0.85rem;
-  }
-}
-
-  /* Ensure all child elements use border-box */
-  .game-container *,
-  .game-container *::before,
-  .game-container *::after {
-    box-sizing: border-box;
-  }
-
-  /* Creeping Fog Effect */
-  .game-container::before {
-    content: '';
-    position: fixed;
-    bottom: -50px;
-    left: -50%;
-    width: 200%;
-    height: 300px;
-    background: 
-      radial-gradient(ellipse at center, rgba(139, 137, 137, 0.1) 0%, transparent 70%),
-      radial-gradient(ellipse at 20% 50%, rgba(169, 169, 169, 0.05) 0%, transparent 60%),
-      radial-gradient(ellipse at 80% 30%, rgba(105, 105, 105, 0.08) 0%, transparent 50%);
-    animation: creepingFog 25s ease-in-out infinite, fogDrift 40s linear infinite;
-    pointer-events: none;
-    z-index: -1;
-  }
-
-  /* Ominous Shadows */
-  .game-container::after {
-    content: '';
-    position: fixed;
-    top: -20%;
-    right: -30%;
-    width: 80%;
-    height: 120%;
-    background: 
-      radial-gradient(ellipse at center, transparent 30%, rgba(139, 0, 0, 0.03) 50%, transparent 80%),
-      conic-gradient(from 0deg, transparent, rgba(64, 0, 0, 0.05), transparent, rgba(25, 25, 112, 0.03), transparent);
-    animation: ominousShadows 60s ease-in-out infinite;
-    pointer-events: none;
-    z-index: -1;
-  }
-
-  /* Floating Blood Droplets */
-  .blood-particles {
-    position: fixed;
-    top: 0;
-    left: 0;
-    width: 100%;
-    height: 100%;
-    pointer-events: none;
-    z-index: -1;
-  }
-
-  .blood-drop {
-    position: absolute;
-    width: 3px;
-    height: 8px;
-    background: radial-gradient(ellipse, rgba(139, 0, 0, 0.6), rgba(75, 0, 0, 0.3));
-    border-radius: 50% 50% 50% 50% / 60% 60% 40% 40%;
-    animation: bloodFall 15s infinite linear;
-  }
-
-  .blood-drop:nth-child(1) { left: 15%; animation-delay: 0s; }
-  .blood-drop:nth-child(2) { left: 35%; animation-delay: -3s; }
-  .blood-drop:nth-child(3) { left: 55%; animation-delay: -6s; }
-  .blood-drop:nth-child(4) { left: 75%; animation-delay: -9s; }
-  .blood-drop:nth-child(5) { left: 85%; animation-delay: -12s; }
-
-  /* Dark Container */
-  .container {
-    max-width: 1200px;
-    margin: 0 auto;
-    padding: 2rem;
-    color: #d4d4d8;
-    position: relative;
-    z-index: 1;
-  }
-
-  /* Sinister Game Header */
-  .game-logo {
-    text-align: center;
-    margin-bottom: 3rem;
-    position: relative;
-  }
-
-  /* Occult Symbol Behind Logo */
-  .game-logo::before {
-    content: '';
-    position: absolute;
-    top: -80px;
-    left: 50%;
-    transform: translateX(-50%);
-    width: 300px;
-    height: 300px;
-    background: 
-      conic-gradient(from 0deg, 
-        transparent 0deg, rgba(139, 0, 0, 0.08) 45deg, 
-        transparent 90deg, rgba(25, 25, 112, 0.06) 135deg,
-        transparent 180deg, rgba(139, 0, 0, 0.08) 225deg,
-        transparent 270deg, rgba(64, 0, 0, 0.05) 315deg, transparent 360deg
-      );
-    border-radius: 50%;
-    animation: occultSpin 80s linear infinite;
-    z-index: -1;
-  }
-
-  .game-logo h1 {
-    font-size: 3.5rem;
-    margin: 0;
-    background: linear-gradient(45deg, #8b0000, #191970, #2f1b14, #8b0000);
-    background-size: 300% 300%;
-    animation: bloodFlow 8s ease-in-out infinite;
-    -webkit-background-clip: text;
-    -webkit-text-fill-color: transparent;
-    background-clip: text;
-    letter-spacing: 0.15em;
-    font-weight: 900;
-    font-family: 'Georgia', serif;
-    text-shadow: 0 0 30px rgba(139, 0, 0, 0.5);
-    position: relative;
-  }
-
-  /* Dark Decorative Elements */
-  .game-logo h1::before {
-    content: '🗡️';
-    position: absolute;
-    left: -60px;
-    top: 50%;
-    transform: translateY(-50%);
-    font-size: 2.5rem;
-    animation: weaponGlint 12s ease-in-out infinite;
-    filter: drop-shadow(0 0 15px rgba(139, 0, 0, 0.7));
-  }
-
-  .game-logo h1::after {
-    content: '☠️';
-    position: absolute;
-    right: -60px;
-    top: 50%;
-    transform: translateY(-50%);
-    font-size: 2.5rem;
-    animation: skullFloat 10s ease-in-out infinite;
-    filter: drop-shadow(0 0 15px rgba(75, 0, 0, 0.8));
-  }
-
-  .game-subtitle {
-    font-size: 1.2rem;
-    color: #8b8680;
-    margin-top: 1rem;
-    letter-spacing: 0.2em;
-    text-transform: uppercase;
-    font-weight: 600;
-    animation: subtleGlow 6s ease-in-out infinite;
-  }
-
-  /* Back Button */
-  .back-btn {
-    background: linear-gradient(135deg, rgba(139, 0, 0, 0.2), rgba(25, 25, 112, 0.15));
-    border: 2px solid rgba(139, 0, 0, 0.4);
-    color: #d4d4d8;
-    padding: 0.8rem 1.5rem;
-    border-radius: 10px;
-    cursor: pointer;
-    transition: all 0.3s ease;
-    font-family: 'Georgia', serif;
-    text-decoration: none;
-    display: inline-block;
-    margin-bottom: 1rem;
-  }
-
-  .back-btn:hover {
-    background: linear-gradient(135deg, rgba(139, 0, 0, 0.4), rgba(25, 25, 112, 0.3));
-    border-color: #8b0000;
-    color: #ffffff;
-    transform: translateY(-2px);
-  }
-
-  /* Dark Village Interface Elements */
-  .village-panel {
-    background: 
-      linear-gradient(135deg, rgba(25, 25, 112, 0.1), rgba(139, 0, 0, 0.05)),
-      linear-gradient(45deg, rgba(0, 0, 0, 0.8), rgba(20, 20, 40, 0.9));
-    backdrop-filter: blur(15px);
-    border: 2px solid rgba(139, 0, 0, 0.3);
-    border-radius: 20px;
-    padding: 2.5rem;
-    margin-bottom: 2rem;
-    position: relative;
-    overflow: hidden;
-    box-shadow: 
-      0 10px 30px rgba(0, 0, 0, 0.5),
-      inset 0 1px 0 rgba(139, 0, 0, 0.1);
-  }
-
-  .village-panel::before {
-    content: '';
-    position: absolute;
-    top: 0;
-    left: 0;
-    width: 100%;
-    height: 100%;
-    background: 
-      radial-gradient(circle at 20% 80%, rgba(139, 0, 0, 0.03) 0%, transparent 50%),
-      radial-gradient(circle at 80% 20%, rgba(25, 25, 112, 0.02) 0%, transparent 50%);
-    z-index: -1;
-  }
-
-  .village-panel h3 {
-    color: #d4d4d8;
-    font-family: 'Georgia', serif;
-    font-size: 1.5rem;
-    margin-bottom: 1.5rem;
-    background: none;
-    -webkit-background-clip: unset;
-    -webkit-text-fill-color: unset;
-    text-shadow: none;
-    animation: none;
-  }
-
-  .story-text p {
-    color: #d4d4d8;
-    line-height: 1.6;
-    margin-bottom: 1rem;
-    font-family: 'Georgia', serif;
-  }
-
-  .join-description {
-    color: #8b8680;
-    margin-bottom: 1.5rem;
-    font-style: italic;
-  }
-
-  .cult-button {
-    background: linear-gradient(135deg, rgba(139, 0, 0, 0.2), rgba(25, 25, 112, 0.15));
-    border: 2px solid rgba(139, 0, 0, 0.4);
-    color: #d4d4d8;
-    padding: 1.2rem 2.5rem;
-    border-radius: 15px;
-    cursor: pointer;
-    transition: all 0.4s ease;
-    font-weight: 600;
-    font-family: 'Georgia', serif;
-    letter-spacing: 0.05em;
-    position: relative;
-    overflow: hidden;
-    font-size: 1rem;
-    width: auto;
-    text-transform: none;
-    text-shadow: none;
-    animation: none;
-    box-shadow: none;
-  }
-
-  .cult-button::before {
-    content: '';
-    position: absolute;
-    top: 0;
-    left: -100%;
-    width: 100%;
-    height: 100%;
-    background: linear-gradient(90deg, transparent, rgba(139, 0, 0, 0.3), transparent);
-    transition: left 0.5s ease;
-  }
-
-  .cult-button:hover::before {
-    left: 100%;
-  }
-
-  .cult-button:hover {
-    background: linear-gradient(135deg, rgba(139, 0, 0, 0.4), rgba(25, 25, 112, 0.3));
-    border-color: #8b0000;
-    box-shadow: 0 8px 25px rgba(139, 0, 0, 0.4);
-    transform: translateY(-3px);
-    color: #ffffff;
-  }
-
-  .cult-button:disabled {
-    opacity: 0.6;
-    cursor: not-allowed;
-  }
-
-  /* Form Elements */
-  .form-group {
-    margin-bottom: 1.5rem;
-  }
-
-  .form-group label {
-    display: block;
-    margin-bottom: 0.5rem;
-    color: #d4d4d8;
-    font-family: 'Georgia', serif;
-    font-weight: 600;
-    background: none;
-    -webkit-background-clip: unset;
-    -webkit-text-fill-color: unset;
-  }
-
-  .dark-input {
-    background: 
-      linear-gradient(135deg, rgba(0, 0, 0, 0.6), rgba(20, 20, 40, 0.8));
-    border: 2px solid rgba(139, 0, 0, 0.3);
-    color: #d4d4d8;
-    padding: 1rem;
-    border-radius: 10px;
-    font-family: 'Georgia', serif;
-    transition: all 0.3s ease;
-    width: 100%;
-    font-size: 1rem;
-    animation: none;
-    box-shadow: none;
-  }
-
-  .dark-input:focus {
-    outline: none;
-    border-color: #8b0000;
-    box-shadow: 0 0 15px rgba(139, 0, 0, 0.4);
-    background: linear-gradient(135deg, rgba(139, 0, 0, 0.1), rgba(20, 20, 40, 0.9));
-  }
-
-  .dark-input::placeholder {
-    color: #8b8680;
-  }
-
-  /* Player Cards */
-  .lobby-header {
-    display: flex;
-    justify-content: space-between;
-    align-items: center;
-    margin-bottom: 1.5rem;
-  }
-
-  .player-counter {
-    color: #8b8680;
-    font-family: 'Georgia', serif;
-  }
-
-  .count {
-    color: #8b0000;
-    font-weight: bold;
-    font-size: 1.2rem;
-  }
-
-  .debug-info {
-    background: rgba(0, 0, 0, 0.3);
-    padding: 1rem;
-    border-radius: 8px;
-    margin-bottom: 1.5rem;
-    font-size: 0.9rem;
-    color: #8b8680;
-  }
-
-  .empty-lobby {
-    text-align: center;
-    padding: 2rem;
-    color: #8b8680;
-    font-style: italic;
-  }
-
-  .whisper {
-    opacity: 0.7;
-    font-size: 0.9rem;
-  }
-
-  .players-grid {
-    display: grid;
-    gap: 1rem;
-    margin-bottom: 2rem;
-  }
-
-  .player-card {
-    background: 
-      linear-gradient(135deg, rgba(0, 0, 0, 0.6), rgba(20, 20, 40, 0.8)),
-      linear-gradient(45deg, rgba(139, 0, 0, 0.05), rgba(25, 25, 112, 0.03));
-    border: 1px solid rgba(139, 0, 0, 0.3);
-    border-radius: 15px;
-    padding: 1.5rem;
-    transition: all 0.4s ease;
-    position: relative;
-    overflow: hidden;
-    display: flex;
-    align-items: center;
-    gap: 1rem;
-  }
-
-  .player-card:hover {
-    border-color: #8b0000;
-    box-shadow: 0 8px 20px rgba(139, 0, 0, 0.3);
-    transform: translateY(-2px);
-  }
-
-  .player-avatar {
-    width: 50px;
-    height: 50px;
-    background: linear-gradient(135deg, #8b0000, #191970);
-    border-radius: 50%;
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    color: white;
-    font-weight: bold;
-    font-size: 1.2rem;
-  }
-
-  .player-info {
-    flex: 1;
-  }
-
-  .player-name {
-    margin: 0 0 0.5rem 0;
-    color: #d4d4d8;
-    font-family: 'Georgia', serif;
-    font-size: 1.1rem;
-    background: none;
-    -webkit-background-clip: unset;
-    -webkit-text-fill-color: unset;
-  }
-
-  .join-time {
-    margin: 0;
-    color: #8b8680;
-    font-size: 0.9rem;
-  }
-
-  .player-status {
-    display: flex;
-    align-items: center;
-  }
-
-  .status-dot {
-    width: 12px;
-    height: 12px;
-    border-radius: 50%;
-  }
-
-  .status-dot.alive {
-    background: #32cd32;
-    box-shadow: 0 0 8px rgba(50, 205, 50, 0.5);
-  }
-
-  .lobby-actions {
-    display: flex;
-    gap: 1rem;
-    flex-wrap: wrap;
-    align-items: center;
-  }
-
-  .requirement-text {
-    color: #8b8680;
-    font-style: italic;
-    margin: 0;
-  }
-
-  /* Game Status Messages */
-  .message {
-    margin-top: 1rem;
-    padding: 1rem;
-    border-radius: 10px;
-    text-align: center;
-    font-weight: 600;
-  }
-
-  .death-message {
-    background: linear-gradient(135deg, rgba(139, 0, 0, 0.3), rgba(0, 0, 0, 0.8));
-    border: 2px solid #8b0000;
-    color: #ffffff;
-    padding: 1.5rem;
-    border-radius: 15px;
-    text-align: center;
-    font-weight: 600;
-    font-family: 'Georgia', serif;
-    box-shadow: 0 0 25px rgba(139, 0, 0, 0.5);
-    animation: deathPulse 3s ease-in-out infinite;
-  }
-
-  .cult-message {
-    background: linear-gradient(135deg, rgba(25, 25, 112, 0.3), rgba(0, 0, 0, 0.8));
-    border: 2px solid #191970;
-    color: #d4d4d8;
-    padding: 1.5rem;
-    border-radius: 15px;
-    text-align: center;
-    font-style: italic;
-    font-family: 'Georgia', serif;
-  }
-
-  /* Horror Animations */
-  @keyframes bloodFlow {
-    0%, 100% { background-position: 0% 50%; }
-    50% { background-position: 100% 50%; }
-  }
-
-  @keyframes weaponGlint {
-    0%, 100% { 
-      transform: translateY(-50%) rotate(-15deg) scale(1);
-      filter: drop-shadow(0 0 15px rgba(139, 0, 0, 0.7));
-    }
-    50% { 
-      transform: translateY(-50%) rotate(15deg) scale(1.1);
-      filter: drop-shadow(0 0 25px rgba(139, 0, 0, 1)) hue-rotate(30deg);
-    }
-  }
-
-  @keyframes skullFloat {
-    0%, 100% { 
-      transform: translateY(-50%) scale(1);
-      filter: drop-shadow(0 0 15px rgba(75, 0, 0, 0.8));
-    }
-    33% { 
-      transform: translateY(-60%) scale(1.05);
-      filter: drop-shadow(0 0 20px rgba(139, 0, 0, 0.9));
-    }
-    66% { 
-      transform: translateY(-40%) scale(0.95);
-      filter: drop-shadow(0 0 12px rgba(25, 25, 112, 0.7));
-    }
-  }
-
-  @keyframes occultSpin {
-    0% { transform: translateX(-50%) rotate(0deg); }
-    100% { transform: translateX(-50%) rotate(360deg); }
-  }
-
-  @keyframes creepingFog {
-    0%, 100% { opacity: 0.3; transform: scaleX(1); }
-    50% { opacity: 0.6; transform: scaleX(1.2); }
-  }
-
-  @keyframes fogDrift {
-    0% { transform: translateX(-20%); }
-    100% { transform: translateX(20%); }
-  }
-
-  @keyframes ominousShadows {
-    0%, 100% { 
-      opacity: 0.2; 
-      transform: rotate(0deg) scale(1);
-    }
-    50% { 
-      opacity: 0.4; 
-      transform: rotate(180deg) scale(1.1);
-    }
-  }
-
-  @keyframes bloodFall {
-    0% { 
-      transform: translateY(-100vh) rotate(0deg);
-      opacity: 0;
-    }
-    10% { opacity: 0.8; }
-    90% { opacity: 0.6; }
-    100% { 
-      transform: translateY(100vh) rotate(360deg);
-      opacity: 0;
-    }
-  }
-
-  @keyframes subtleGlow {
-    0%, 100% { 
-      opacity: 0.7; 
-      text-shadow: 0 0 10px rgba(139, 0, 0, 0.3);
-    }
-    50% { 
-      opacity: 1; 
-      text-shadow: 0 0 20px rgba(139, 0, 0, 0.6);
-    }
-  }
-
-  @keyframes deathPulse {
-    0%, 100% { 
-      box-shadow: 0 0 25px rgba(139, 0, 0, 0.5);
-      border-color: #8b0000;
-    }
-    50% { 
-      box-shadow: 0 0 35px rgba(139, 0, 0, 0.8);
-      border-color: #ff0000;
-    }
-  }
-
-  /* Mobile Responsive Design */
-  @media (max-width: 768px) {
-    .container {
-      padding: 1rem;
-    }
-    
-    .game-logo h1 {
-      font-size: 2.5rem;
-    }
-    
-    .game-logo h1::before,
-    .game-logo h1::after {
-      display: none;
-    }
-    
-    .village-panel {
-      padding: 1.5rem;
-    }
-
-    .cult-button {
-      padding: 1rem 1.5rem;
-      font-size: 0.9rem;
-      min-height: 44px; /* Touch-friendly */
-    }
-
-    .dark-input {
-      padding: 0.8rem;
-      font-size: 16px; /* Prevents zoom on iOS */
-      min-height: 44px;
-    }
-
-    .lobby-actions {
-      flex-direction: column;
-      align-items: stretch;
-    }
-
-    .player-card {
-      padding: 1rem;
-    }
-
-    .player-avatar {
-      width: 40px;
-      height: 40px;
-      font-size: 1rem;
-    }
-
-    .debug-info {
-      font-size: 0.8rem;
-      padding: 0.8rem;
-    }
-  }
-
-  /* Touch-friendly improvements for mobile */
-  @media (max-width: 480px) {
-    .game-logo h1 {
-      font-size: 2rem;
-    }
-    
-    .village-panel {
-      padding: 1rem;
-    }
-    
-    .cult-button {
-      width: 100%;
-      padding: 1.2rem;
-    }
-    
-    .players-grid {
-      grid-template-columns: 1fr;
-    }
-  }</style>
+	.game-container {
+		/* Reset any inherited floral styles */
+		all: initial;
+		display: block;
+
+		/* Dark Village Atmosphere */
+		background:
+			radial-gradient(ellipse at top, #1a1a2e 0%, #16213e 30%, #0f0f23 60%, #000000 100%),
+			linear-gradient(180deg, #0a0a0f 0%, #1a1320 40%, #2d1b2e 70%, #000000 100%);
+		min-height: 100vh;
+		position: relative;
+		overflow-x: hidden;
+		font-family: 'Georgia', 'Times New Roman', serif;
+		color: #d4d4d8;
+		box-sizing: border-box;
+	}
+
+	/* Add these styles to your existing lobby CSS */
+
+	/* Join Game Section */
+	.join-game-section {
+		margin-bottom: 2rem;
+	}
+
+	.join-form {
+		display: flex;
+		flex-direction: column;
+		gap: 1rem;
+		max-width: 400px;
+		margin: 0 auto;
+	}
+
+	.form-group {
+		margin-bottom: 1.5rem;
+	}
+
+	.form-group label {
+		display: block;
+		margin-bottom: 0.5rem;
+		color: #d4d4d8;
+		font-family: 'Georgia', serif;
+		font-weight: 600;
+		background: none;
+		-webkit-background-clip: unset;
+		-webkit-text-fill-color: unset;
+	}
+
+	.dark-input {
+		background: linear-gradient(135deg, rgba(0, 0, 0, 0.6), rgba(20, 20, 40, 0.8));
+		border: 2px solid rgba(139, 0, 0, 0.3);
+		color: #d4d4d8;
+		padding: 1rem;
+		border-radius: 10px;
+		font-family: 'Georgia', serif;
+		transition: all 0.3s ease;
+		width: 100%;
+		font-size: 1rem;
+		animation: none;
+		box-shadow: none;
+	}
+
+	.dark-input:focus {
+		outline: none;
+		border-color: #8b0000;
+		box-shadow: 0 0 15px rgba(139, 0, 0, 0.4);
+		background: linear-gradient(135deg, rgba(139, 0, 0, 0.1), rgba(20, 20, 40, 0.9));
+	}
+
+	.dark-input::placeholder {
+		color: #8b8680;
+	}
+
+	.dark-input:disabled {
+		opacity: 0.6;
+		cursor: not-allowed;
+	}
+
+	/* Lobby Status Section */
+	.lobby-status {
+		margin-top: 2rem;
+		display: flex;
+		flex-direction: column;
+		gap: 1rem;
+		align-items: center;
+	}
+
+	.waiting-message,
+	.starting-message {
+		display: flex;
+		align-items: center;
+		gap: 1rem;
+		padding: 1.5rem;
+		border-radius: 15px;
+		text-align: left;
+		width: 100%;
+		max-width: 500px;
+	}
+
+	.waiting-message {
+		background: linear-gradient(135deg, rgba(25, 25, 112, 0.2), rgba(0, 0, 0, 0.6));
+		border: 2px solid rgba(25, 25, 112, 0.4);
+		color: #d4d4d8;
+	}
+
+	.starting-message {
+		background: linear-gradient(135deg, rgba(139, 0, 0, 0.3), rgba(0, 0, 0, 0.8));
+		border: 2px solid #8b0000;
+		color: #ffffff;
+		animation: deathPulse 3s ease-in-out infinite;
+	}
+
+	.status-indicator {
+		width: 16px;
+		height: 16px;
+		border-radius: 50%;
+		flex-shrink: 0;
+	}
+
+	.status-indicator.pulsing {
+		background: #191970;
+		animation: statusPulse 2s ease-in-out infinite;
+	}
+
+	.status-indicator.starting {
+		background: #8b0000;
+		animation: bloodPulse 1.5s ease-in-out infinite;
+	}
+
+	.waiting-message h4,
+	.starting-message h4 {
+		margin: 0 0 0.5rem 0;
+		font-family: 'Georgia', serif;
+		font-size: 1.2rem;
+		font-weight: 600;
+	}
+
+	.waiting-message p,
+	.starting-message p {
+		margin: 0;
+		opacity: 0.9;
+		font-style: italic;
+	}
+
+	.admin-link-btn {
+		background: linear-gradient(135deg, rgba(139, 0, 0, 0.1), rgba(25, 25, 112, 0.1));
+		border: 1px solid rgba(139, 0, 0, 0.3);
+		color: #8b8680;
+		padding: 0.8rem 1.5rem;
+		border-radius: 10px;
+		cursor: pointer;
+		transition: all 0.3s ease;
+		font-family: 'Georgia', serif;
+		font-size: 0.9rem;
+		text-decoration: none;
+		display: inline-block;
+		margin-top: 1rem;
+	}
+
+	.admin-link-btn:hover {
+		background: linear-gradient(135deg, rgba(139, 0, 0, 0.2), rgba(25, 25, 112, 0.2));
+		border-color: #8b0000;
+		color: #d4d4d8;
+		transform: translateY(-1px);
+	}
+
+	.player-role {
+		font-size: 0.8rem;
+		color: #8b8680;
+		margin: 0.25rem 0 0 0;
+		font-style: italic;
+	}
+
+	/* Clear Lobby Button */
+	.clear-lobby-btn {
+		background: linear-gradient(135deg, rgba(107, 114, 128, 0.2), rgba(75, 85, 99, 0.15));
+		border: 2px solid rgba(107, 114, 128, 0.4);
+		color: #9ca3af;
+		padding: 0.8rem 1.5rem;
+		border-radius: 10px;
+		cursor: pointer;
+		transition: all 0.3s ease;
+		font-family: 'Georgia', serif;
+		font-size: 0.9rem;
+		margin-top: 1rem;
+	}
+
+	.clear-lobby-btn:hover {
+		background: linear-gradient(135deg, rgba(107, 114, 128, 0.4), rgba(75, 85, 99, 0.3));
+		border-color: #6b7280;
+		color: #f3f4f6;
+		transform: translateY(-1px);
+	}
+
+	/* Message Display */
+	.join-message {
+		margin-top: 1rem;
+		padding: 1rem;
+		border-radius: 10px;
+		text-align: center;
+		font-weight: 600;
+		font-family: 'Georgia', serif;
+	}
+
+	.join-message.success {
+		background: linear-gradient(135deg, rgba(5, 150, 105, 0.2), rgba(0, 0, 0, 0.6));
+		border: 2px solid rgba(5, 150, 105, 0.4);
+		color: #10b981;
+	}
+
+	.join-message.error {
+		background: linear-gradient(135deg, rgba(239, 68, 68, 0.2), rgba(0, 0, 0, 0.6));
+		border: 2px solid rgba(239, 68, 68, 0.4);
+		color: #ef4444;
+	}
+
+	.join-message.info {
+		background: linear-gradient(135deg, rgba(59, 130, 246, 0.2), rgba(0, 0, 0, 0.6));
+		border: 2px solid rgba(59, 130, 246, 0.4);
+		color: #60a5fa;
+	}
+
+	/* Enhanced animations */
+	@keyframes statusPulse {
+		0%,
+		100% {
+			opacity: 1;
+			transform: scale(1);
+		}
+		50% {
+			opacity: 0.6;
+			transform: scale(1.1);
+		}
+	}
+
+	@keyframes bloodPulse {
+		0%,
+		100% {
+			opacity: 1;
+			transform: scale(1);
+			background: #8b0000;
+		}
+		50% {
+			opacity: 0.8;
+			transform: scale(1.2);
+			background: #ff0000;
+		}
+	}
+
+	/* Loading state for join button */
+	.cult-button.loading {
+		pointer-events: none;
+		opacity: 0.7;
+		position: relative;
+	}
+
+	.cult-button.loading::after {
+		content: '';
+		position: absolute;
+		right: 1rem;
+		top: 50%;
+		transform: translateY(-50%);
+		width: 16px;
+		height: 16px;
+		border: 2px solid transparent;
+		border-top: 2px solid currentColor;
+		border-radius: 50%;
+		animation: spin 1s linear infinite;
+	}
+
+	@keyframes spin {
+		0% {
+			transform: translateY(-50%) rotate(0deg);
+		}
+		100% {
+			transform: translateY(-50%) rotate(360deg);
+		}
+	}
+
+	/* Mobile responsive adjustments */
+	@media (max-width: 768px) {
+		.waiting-message,
+		.starting-message {
+			padding: 1rem;
+			flex-direction: column;
+			text-align: center;
+			gap: 0.75rem;
+		}
+
+		.status-indicator {
+			width: 20px;
+			height: 20px;
+		}
+
+		.lobby-status {
+			margin-top: 1.5rem;
+		}
+
+		.admin-link-btn,
+		.clear-lobby-btn {
+			width: 100%;
+			text-align: center;
+		}
+
+		.join-form {
+			max-width: 100%;
+		}
+
+		.cult-button {
+			width: 100%;
+		}
+	}
+
+	@media (max-width: 480px) {
+		.join-form {
+			gap: 0.75rem;
+		}
+
+		.form-group {
+			margin-bottom: 1rem;
+		}
+
+		.dark-input {
+			padding: 0.8rem;
+			font-size: 16px; /* Prevents zoom on iOS */
+		}
+
+		.cult-button {
+			padding: 1rem;
+			font-size: 0.9rem;
+		}
+
+		.waiting-message h4,
+		.starting-message h4 {
+			font-size: 1.1rem;
+		}
+
+		.waiting-message p,
+		.starting-message p {
+			font-size: 0.9rem;
+		}
+
+		.admin-link-btn,
+		.clear-lobby-btn {
+			padding: 0.7rem 1.2rem;
+			font-size: 0.85rem;
+		}
+	}
+
+	/* Ensure all child elements use border-box */
+	.game-container *,
+	.game-container *::before,
+	.game-container *::after {
+		box-sizing: border-box;
+	}
+
+	/* Creeping Fog Effect */
+	.game-container::before {
+		content: '';
+		position: fixed;
+		bottom: -50px;
+		left: -50%;
+		width: 200%;
+		height: 300px;
+		background:
+			radial-gradient(ellipse at center, rgba(139, 137, 137, 0.1) 0%, transparent 70%),
+			radial-gradient(ellipse at 20% 50%, rgba(169, 169, 169, 0.05) 0%, transparent 60%),
+			radial-gradient(ellipse at 80% 30%, rgba(105, 105, 105, 0.08) 0%, transparent 50%);
+		animation:
+			creepingFog 25s ease-in-out infinite,
+			fogDrift 40s linear infinite;
+		pointer-events: none;
+		z-index: -1;
+	}
+
+	/* Ominous Shadows */
+	.game-container::after {
+		content: '';
+		position: fixed;
+		top: -20%;
+		right: -30%;
+		width: 80%;
+		height: 120%;
+		background:
+			radial-gradient(
+				ellipse at center,
+				transparent 30%,
+				rgba(139, 0, 0, 0.03) 50%,
+				transparent 80%
+			),
+			conic-gradient(
+				from 0deg,
+				transparent,
+				rgba(64, 0, 0, 0.05),
+				transparent,
+				rgba(25, 25, 112, 0.03),
+				transparent
+			);
+		animation: ominousShadows 60s ease-in-out infinite;
+		pointer-events: none;
+		z-index: -1;
+	}
+
+	/* Floating Blood Droplets */
+	.blood-particles {
+		position: fixed;
+		top: 0;
+		left: 0;
+		width: 100%;
+		height: 100%;
+		pointer-events: none;
+		z-index: -1;
+	}
+
+	.blood-drop {
+		position: absolute;
+		width: 3px;
+		height: 8px;
+		background: radial-gradient(ellipse, rgba(139, 0, 0, 0.6), rgba(75, 0, 0, 0.3));
+		border-radius: 50% 50% 50% 50% / 60% 60% 40% 40%;
+		animation: bloodFall 15s infinite linear;
+	}
+
+	.blood-drop:nth-child(1) {
+		left: 15%;
+		animation-delay: 0s;
+	}
+	.blood-drop:nth-child(2) {
+		left: 35%;
+		animation-delay: -3s;
+	}
+	.blood-drop:nth-child(3) {
+		left: 55%;
+		animation-delay: -6s;
+	}
+	.blood-drop:nth-child(4) {
+		left: 75%;
+		animation-delay: -9s;
+	}
+	.blood-drop:nth-child(5) {
+		left: 85%;
+		animation-delay: -12s;
+	}
+
+	/* Dark Container */
+	.container {
+		max-width: 1200px;
+		margin: 0 auto;
+		padding: 2rem;
+		color: #d4d4d8;
+		position: relative;
+		z-index: 1;
+	}
+
+	/* Sinister Game Header */
+	.game-logo {
+		text-align: center;
+		margin-bottom: 3rem;
+		position: relative;
+	}
+
+	/* Occult Symbol Behind Logo */
+	.game-logo::before {
+		content: '';
+		position: absolute;
+		top: -80px;
+		left: 50%;
+		transform: translateX(-50%);
+		width: 300px;
+		height: 300px;
+		background: conic-gradient(
+			from 0deg,
+			transparent 0deg,
+			rgba(139, 0, 0, 0.08) 45deg,
+			transparent 90deg,
+			rgba(25, 25, 112, 0.06) 135deg,
+			transparent 180deg,
+			rgba(139, 0, 0, 0.08) 225deg,
+			transparent 270deg,
+			rgba(64, 0, 0, 0.05) 315deg,
+			transparent 360deg
+		);
+		border-radius: 50%;
+		animation: occultSpin 80s linear infinite;
+		z-index: -1;
+	}
+
+	.game-logo h1 {
+		font-size: 3.5rem;
+		margin: 0;
+		background: linear-gradient(45deg, #8b0000, #191970, #2f1b14, #8b0000);
+		background-size: 300% 300%;
+		animation: bloodFlow 8s ease-in-out infinite;
+		-webkit-background-clip: text;
+		-webkit-text-fill-color: transparent;
+		background-clip: text;
+		letter-spacing: 0.15em;
+		font-weight: 900;
+		font-family: 'Georgia', serif;
+		text-shadow: 0 0 30px rgba(139, 0, 0, 0.5);
+		position: relative;
+	}
+
+	/* Dark Decorative Elements */
+	.game-logo h1::before {
+		content: '🗡️';
+		position: absolute;
+		left: -60px;
+		top: 50%;
+		transform: translateY(-50%);
+		font-size: 2.5rem;
+		animation: weaponGlint 12s ease-in-out infinite;
+		filter: drop-shadow(0 0 15px rgba(139, 0, 0, 0.7));
+	}
+
+	.game-logo h1::after {
+		content: '☠️';
+		position: absolute;
+		right: -60px;
+		top: 50%;
+		transform: translateY(-50%);
+		font-size: 2.5rem;
+		animation: skullFloat 10s ease-in-out infinite;
+		filter: drop-shadow(0 0 15px rgba(75, 0, 0, 0.8));
+	}
+
+	.game-subtitle {
+		font-size: 1.2rem;
+		color: #8b8680;
+		margin-top: 1rem;
+		letter-spacing: 0.2em;
+		text-transform: uppercase;
+		font-weight: 600;
+		animation: subtleGlow 6s ease-in-out infinite;
+	}
+
+	/* Back Button */
+	.back-btn {
+		background: linear-gradient(135deg, rgba(139, 0, 0, 0.2), rgba(25, 25, 112, 0.15));
+		border: 2px solid rgba(139, 0, 0, 0.4);
+		color: #d4d4d8;
+		padding: 0.8rem 1.5rem;
+		border-radius: 10px;
+		cursor: pointer;
+		transition: all 0.3s ease;
+		font-family: 'Georgia', serif;
+		text-decoration: none;
+		display: inline-block;
+		margin-bottom: 1rem;
+	}
+
+	.back-btn:hover {
+		background: linear-gradient(135deg, rgba(139, 0, 0, 0.4), rgba(25, 25, 112, 0.3));
+		border-color: #8b0000;
+		color: #ffffff;
+		transform: translateY(-2px);
+	}
+
+	/* Dark Village Interface Elements */
+	.village-panel {
+		background:
+			linear-gradient(135deg, rgba(25, 25, 112, 0.1), rgba(139, 0, 0, 0.05)),
+			linear-gradient(45deg, rgba(0, 0, 0, 0.8), rgba(20, 20, 40, 0.9));
+		backdrop-filter: blur(15px);
+		border: 2px solid rgba(139, 0, 0, 0.3);
+		border-radius: 20px;
+		padding: 2.5rem;
+		margin-bottom: 2rem;
+		position: relative;
+		overflow: hidden;
+		box-shadow:
+			0 10px 30px rgba(0, 0, 0, 0.5),
+			inset 0 1px 0 rgba(139, 0, 0, 0.1);
+	}
+
+	.village-panel::before {
+		content: '';
+		position: absolute;
+		top: 0;
+		left: 0;
+		width: 100%;
+		height: 100%;
+		background:
+			radial-gradient(circle at 20% 80%, rgba(139, 0, 0, 0.03) 0%, transparent 50%),
+			radial-gradient(circle at 80% 20%, rgba(25, 25, 112, 0.02) 0%, transparent 50%);
+		z-index: -1;
+	}
+
+	.village-panel h3 {
+		color: #d4d4d8;
+		font-family: 'Georgia', serif;
+		font-size: 1.5rem;
+		margin-bottom: 1.5rem;
+		background: none;
+		-webkit-background-clip: unset;
+		-webkit-text-fill-color: unset;
+		text-shadow: none;
+		animation: none;
+	}
+
+	.story-text p {
+		color: #d4d4d8;
+		line-height: 1.6;
+		margin-bottom: 1rem;
+		font-family: 'Georgia', serif;
+	}
+
+	.join-description {
+		color: #8b8680;
+		margin-bottom: 1.5rem;
+		font-style: italic;
+	}
+
+	.cult-button {
+		background: linear-gradient(135deg, rgba(139, 0, 0, 0.2), rgba(25, 25, 112, 0.15));
+		border: 2px solid rgba(139, 0, 0, 0.4);
+		color: #d4d4d8;
+		padding: 1.2rem 2.5rem;
+		border-radius: 15px;
+		cursor: pointer;
+		transition: all 0.4s ease;
+		font-weight: 600;
+		font-family: 'Georgia', serif;
+		letter-spacing: 0.05em;
+		position: relative;
+		overflow: hidden;
+		font-size: 1rem;
+		width: auto;
+		text-transform: none;
+		text-shadow: none;
+		animation: none;
+		box-shadow: none;
+	}
+
+	.cult-button::before {
+		content: '';
+		position: absolute;
+		top: 0;
+		left: -100%;
+		width: 100%;
+		height: 100%;
+		background: linear-gradient(90deg, transparent, rgba(139, 0, 0, 0.3), transparent);
+		transition: left 0.5s ease;
+	}
+
+	.cult-button:hover::before {
+		left: 100%;
+	}
+
+	.cult-button:hover {
+		background: linear-gradient(135deg, rgba(139, 0, 0, 0.4), rgba(25, 25, 112, 0.3));
+		border-color: #8b0000;
+		box-shadow: 0 8px 25px rgba(139, 0, 0, 0.4);
+		transform: translateY(-3px);
+		color: #ffffff;
+	}
+
+	.cult-button:disabled {
+		opacity: 0.6;
+		cursor: not-allowed;
+	}
+
+	/* Form Elements */
+	.form-group {
+		margin-bottom: 1.5rem;
+	}
+
+	.form-group label {
+		display: block;
+		margin-bottom: 0.5rem;
+		color: #d4d4d8;
+		font-family: 'Georgia', serif;
+		font-weight: 600;
+		background: none;
+		-webkit-background-clip: unset;
+		-webkit-text-fill-color: unset;
+	}
+
+	.dark-input {
+		background: linear-gradient(135deg, rgba(0, 0, 0, 0.6), rgba(20, 20, 40, 0.8));
+		border: 2px solid rgba(139, 0, 0, 0.3);
+		color: #d4d4d8;
+		padding: 1rem;
+		border-radius: 10px;
+		font-family: 'Georgia', serif;
+		transition: all 0.3s ease;
+		width: 100%;
+		font-size: 1rem;
+		animation: none;
+		box-shadow: none;
+	}
+
+	.dark-input:focus {
+		outline: none;
+		border-color: #8b0000;
+		box-shadow: 0 0 15px rgba(139, 0, 0, 0.4);
+		background: linear-gradient(135deg, rgba(139, 0, 0, 0.1), rgba(20, 20, 40, 0.9));
+	}
+
+	.dark-input::placeholder {
+		color: #8b8680;
+	}
+
+	/* Player Cards */
+	.lobby-header {
+		display: flex;
+		justify-content: space-between;
+		align-items: center;
+		margin-bottom: 1.5rem;
+	}
+
+	.player-counter {
+		color: #8b8680;
+		font-family: 'Georgia', serif;
+	}
+
+	.count {
+		color: #8b0000;
+		font-weight: bold;
+		font-size: 1.2rem;
+	}
+
+	.debug-info {
+		background: rgba(0, 0, 0, 0.3);
+		padding: 1rem;
+		border-radius: 8px;
+		margin-bottom: 1.5rem;
+		font-size: 0.9rem;
+		color: #8b8680;
+	}
+
+	.empty-lobby {
+		text-align: center;
+		padding: 2rem;
+		color: #8b8680;
+		font-style: italic;
+	}
+
+	.whisper {
+		opacity: 0.7;
+		font-size: 0.9rem;
+	}
+
+	.players-grid {
+		display: grid;
+		gap: 1rem;
+		margin-bottom: 2rem;
+	}
+
+	.player-card {
+		background:
+			linear-gradient(135deg, rgba(0, 0, 0, 0.6), rgba(20, 20, 40, 0.8)),
+			linear-gradient(45deg, rgba(139, 0, 0, 0.05), rgba(25, 25, 112, 0.03));
+		border: 1px solid rgba(139, 0, 0, 0.3);
+		border-radius: 15px;
+		padding: 1.5rem;
+		transition: all 0.4s ease;
+		position: relative;
+		overflow: hidden;
+		display: flex;
+		align-items: center;
+		gap: 1rem;
+	}
+
+	.player-card:hover {
+		border-color: #8b0000;
+		box-shadow: 0 8px 20px rgba(139, 0, 0, 0.3);
+		transform: translateY(-2px);
+	}
+
+	.player-avatar {
+		width: 50px;
+		height: 50px;
+		background: linear-gradient(135deg, #8b0000, #191970);
+		border-radius: 50%;
+		display: flex;
+		align-items: center;
+		justify-content: center;
+		color: white;
+		font-weight: bold;
+		font-size: 1.2rem;
+	}
+
+	.player-info {
+		flex: 1;
+	}
+
+	.player-name {
+		margin: 0 0 0.5rem 0;
+		color: #d4d4d8;
+		font-family: 'Georgia', serif;
+		font-size: 1.1rem;
+		background: none;
+		-webkit-background-clip: unset;
+		-webkit-text-fill-color: unset;
+	}
+
+	.join-time {
+		margin: 0;
+		color: #8b8680;
+		font-size: 0.9rem;
+	}
+
+	.player-status {
+		display: flex;
+		align-items: center;
+	}
+
+	.status-dot {
+		width: 12px;
+		height: 12px;
+		border-radius: 50%;
+	}
+
+	.status-dot.alive {
+		background: #32cd32;
+		box-shadow: 0 0 8px rgba(50, 205, 50, 0.5);
+	}
+
+	.lobby-actions {
+		display: flex;
+		gap: 1rem;
+		flex-wrap: wrap;
+		align-items: center;
+	}
+
+	.requirement-text {
+		color: #8b8680;
+		font-style: italic;
+		margin: 0;
+	}
+
+	/* Game Status Messages */
+	.message {
+		margin-top: 1rem;
+		padding: 1rem;
+		border-radius: 10px;
+		text-align: center;
+		font-weight: 600;
+	}
+
+	.death-message {
+		background: linear-gradient(135deg, rgba(139, 0, 0, 0.3), rgba(0, 0, 0, 0.8));
+		border: 2px solid #8b0000;
+		color: #ffffff;
+		padding: 1.5rem;
+		border-radius: 15px;
+		text-align: center;
+		font-weight: 600;
+		font-family: 'Georgia', serif;
+		box-shadow: 0 0 25px rgba(139, 0, 0, 0.5);
+		animation: deathPulse 3s ease-in-out infinite;
+	}
+
+	.cult-message {
+		background: linear-gradient(135deg, rgba(25, 25, 112, 0.3), rgba(0, 0, 0, 0.8));
+		border: 2px solid #191970;
+		color: #d4d4d8;
+		padding: 1.5rem;
+		border-radius: 15px;
+		text-align: center;
+		font-style: italic;
+		font-family: 'Georgia', serif;
+	}
+
+	/* Horror Animations */
+	@keyframes bloodFlow {
+		0%,
+		100% {
+			background-position: 0% 50%;
+		}
+		50% {
+			background-position: 100% 50%;
+		}
+	}
+
+	@keyframes weaponGlint {
+		0%,
+		100% {
+			transform: translateY(-50%) rotate(-15deg) scale(1);
+			filter: drop-shadow(0 0 15px rgba(139, 0, 0, 0.7));
+		}
+		50% {
+			transform: translateY(-50%) rotate(15deg) scale(1.1);
+			filter: drop-shadow(0 0 25px rgba(139, 0, 0, 1)) hue-rotate(30deg);
+		}
+	}
+
+	@keyframes skullFloat {
+		0%,
+		100% {
+			transform: translateY(-50%) scale(1);
+			filter: drop-shadow(0 0 15px rgba(75, 0, 0, 0.8));
+		}
+		33% {
+			transform: translateY(-60%) scale(1.05);
+			filter: drop-shadow(0 0 20px rgba(139, 0, 0, 0.9));
+		}
+		66% {
+			transform: translateY(-40%) scale(0.95);
+			filter: drop-shadow(0 0 12px rgba(25, 25, 112, 0.7));
+		}
+	}
+
+	@keyframes occultSpin {
+		0% {
+			transform: translateX(-50%) rotate(0deg);
+		}
+		100% {
+			transform: translateX(-50%) rotate(360deg);
+		}
+	}
+
+	@keyframes creepingFog {
+		0%,
+		100% {
+			opacity: 0.3;
+			transform: scaleX(1);
+		}
+		50% {
+			opacity: 0.6;
+			transform: scaleX(1.2);
+		}
+	}
+
+	@keyframes fogDrift {
+		0% {
+			transform: translateX(-20%);
+		}
+		100% {
+			transform: translateX(20%);
+		}
+	}
+
+	@keyframes ominousShadows {
+		0%,
+		100% {
+			opacity: 0.2;
+			transform: rotate(0deg) scale(1);
+		}
+		50% {
+			opacity: 0.4;
+			transform: rotate(180deg) scale(1.1);
+		}
+	}
+
+	@keyframes bloodFall {
+		0% {
+			transform: translateY(-100vh) rotate(0deg);
+			opacity: 0;
+		}
+		10% {
+			opacity: 0.8;
+		}
+		90% {
+			opacity: 0.6;
+		}
+		100% {
+			transform: translateY(100vh) rotate(360deg);
+			opacity: 0;
+		}
+	}
+
+	@keyframes subtleGlow {
+		0%,
+		100% {
+			opacity: 0.7;
+			text-shadow: 0 0 10px rgba(139, 0, 0, 0.3);
+		}
+		50% {
+			opacity: 1;
+			text-shadow: 0 0 20px rgba(139, 0, 0, 0.6);
+		}
+	}
+
+	@keyframes deathPulse {
+		0%,
+		100% {
+			box-shadow: 0 0 25px rgba(139, 0, 0, 0.5);
+			border-color: #8b0000;
+		}
+		50% {
+			box-shadow: 0 0 35px rgba(139, 0, 0, 0.8);
+			border-color: #ff0000;
+		}
+	}
+
+	/* Mobile Responsive Design */
+	@media (max-width: 768px) {
+		.container {
+			padding: 1rem;
+		}
+
+		.game-logo h1 {
+			font-size: 2.5rem;
+		}
+
+		.game-logo h1::before,
+		.game-logo h1::after {
+			display: none;
+		}
+
+		.village-panel {
+			padding: 1.5rem;
+		}
+
+		.cult-button {
+			padding: 1rem 1.5rem;
+			font-size: 0.9rem;
+			min-height: 44px; /* Touch-friendly */
+		}
+
+		.dark-input {
+			padding: 0.8rem;
+			font-size: 16px; /* Prevents zoom on iOS */
+			min-height: 44px;
+		}
+
+		.lobby-actions {
+			flex-direction: column;
+			align-items: stretch;
+		}
+
+		.player-card {
+			padding: 1rem;
+		}
+
+		.player-avatar {
+			width: 40px;
+			height: 40px;
+			font-size: 1rem;
+		}
+
+		.debug-info {
+			font-size: 0.8rem;
+			padding: 0.8rem;
+		}
+	}
+
+	/* Touch-friendly improvements for mobile */
+	@media (max-width: 480px) {
+		.game-logo h1 {
+			font-size: 2rem;
+		}
+
+		.village-panel {
+			padding: 1rem;
+		}
+
+		.cult-button {
+			width: 100%;
+			padding: 1.2rem;
+		}
+
+		.players-grid {
+			grid-template-columns: 1fr;
+		}
+	}
+</style>
