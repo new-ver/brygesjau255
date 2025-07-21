@@ -64,7 +64,7 @@
 	async function checkPlayerStatus() {
 		const savedName = sessionStorage.getItem('playerName');
 		if (!savedName) {
-			goto('/join'); // Redirect to join page if not joined
+			goto('/whispers'); // Redirect to join page if not joined
 			return;
 		}
 
@@ -79,14 +79,14 @@
 
 			if (error || !data) {
 				console.error('Player not found:', error);
-				goto('/join');
+				goto('/whispers');
 				return;
 			}
 
 			currentPlayer = data;
 		} catch (error) {
 			console.error('Error checking player status:', error);
-			goto('/join');
+			goto('/whispers');
 		}
 	}
 
