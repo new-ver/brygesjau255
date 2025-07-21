@@ -3,6 +3,7 @@
 	import { goto } from '$app/navigation';
 	import { supabase } from '$lib/supabase';
 	import type { RealtimeChannel } from '@supabase/supabase-js';
+	// Optimized subscription flow to prevent infinite loops
 
 	interface GamePlayer {
 		id: string;
@@ -22,105 +23,370 @@
 		updated_at: string;
 	}
 
+	// State management with change detection
 	let players: GamePlayer[] = [];
 	let gameState: GameState | null = null;
 	let adminMessage = '';
 	let isProcessing = false;
 	let subscription: RealtimeChannel | null = null;
 
-	// Game controls
-	// let selectedPlayers: string[] = []
+	// Add loading states to prevent redundant calls
+	let isLoadingPlayers = false;
+	let isLoadingGameState = false;
 
-	async function loadGameData() {
+	// Track last known state to detect actual changes
+	let lastKnownGameStatus: string | null = null;
+	let lastKnownPlayerCount = 0;
+
+	// Debounce mechanism to prevent rapid-fire updates
+	let loadDataTimeout: NodeJS.Timeout | null = null;
+	const DEBOUNCE_MS = 100;
+
+	// Separate loading functions with loading guards
+	async function loadPlayers() {
+		if (isLoadingPlayers) {
+			console.log('⏸️ Players already loading, skipping...');
+			return;
+		}
+
+		isLoadingPlayers = true;
 		try {
-			// Load players
+			console.log('👥 Loading players...');
+
 			const { data: playersData, error: playersError } = await supabase
 				.from('game_players')
 				.select('*')
 				.order('joined_at', { ascending: true });
 
 			if (playersError) throw new Error(`Players error: ${playersError.message}`);
+
+			const oldPlayerCount = players.length;
 			players = playersData ?? [];
 
-			// Load game state
+			// Only log if there's an actual change
+			if (players.length !== lastKnownPlayerCount) {
+				console.log(`👥 Players updated: ${lastKnownPlayerCount} → ${players.length}`);
+				lastKnownPlayerCount = players.length;
+			}
+		} catch (error: unknown) {
+			console.error('💥 Error loading players:', error);
+			adminMessage = `Error loading players: ${error ?? 'Unknown error'}`;
+		} finally {
+			isLoadingPlayers = false;
+		}
+	}
+
+	async function loadGameState() {
+		if (isLoadingGameState) {
+			console.log('⏸️ Game state already loading, skipping...');
+			return;
+		}
+
+		isLoadingGameState = true;
+		try {
+			console.log('🎮 Loading game state...');
+
 			const { data: stateData, error: stateError } = await supabase
 				.from('game_state')
 				.select('*')
 				.single();
 
 			if (stateError) {
-				// Ignore specific "no rows" error (code PGRST116 or message with "Results contain 0 rows")
 				if (
 					stateError.code !== 'PGRST116' &&
 					!stateError.message.includes('Results contain 0 rows')
 				) {
 					throw new Error(`Game state error: ${stateError.message}`);
 				}
-			}
+				console.log('📝 No game state found - game not started yet');
+				gameState = null;
+				lastKnownGameStatus = null;
+			} else {
+				const oldStatus = gameState?.status;
+				gameState = stateData;
 
-			gameState = stateData ?? null;
+				// Only log and trigger transitions if there's an actual change
+				if (gameState && gameState.status !== lastKnownGameStatus) {
+					console.log(
+						`🎮 Game status changed: ${lastKnownGameStatus || 'null'} → ${gameState.status}`
+					);
+					console.log(`📋 New phase: ${gameState.current_phase}`);
+					lastKnownGameStatus = gameState.status;
+
+					// Only trigger game transition logic here, not in every load
+					checkForGameTransition();
+				}
+			}
 		} catch (error: unknown) {
-			console.error('Error loading game data:', error);
-			adminMessage = `Error loading data: ${error ?? 'Unknown error'}`;
+			console.error('💥 Error loading game state:', error);
+			adminMessage = `Error loading game state: ${error ?? 'Unknown error'}`;
+		} finally {
+			isLoadingGameState = false;
 		}
 	}
 
+	// Debounced combined loader
+	function debouncedLoadGameData() {
+		if (loadDataTimeout) {
+			clearTimeout(loadDataTimeout);
+		}
+
+		loadDataTimeout = setTimeout(async () => {
+			console.log('📊 Loading game data (debounced)...');
+			await Promise.all([loadPlayers(), loadGameState()]);
+		}, DEBOUNCE_MS);
+	}
+
+	// Direct loader for initial load and manual refreshes
+	async function loadGameData() {
+		console.log('📊 Loading game data (immediate)...');
+		await Promise.all([loadPlayers(), loadGameState()]);
+	}
+
+	// Game transition logic separated from data loading
+	function checkForGameTransition() {
+		if (!gameState) return;
+
+		console.log(`🔄 Checking transition for status: ${gameState.status}`);
+
+		// Add your game transition logic here
+		if (gameState.status === 'night') {
+			// Handle night phase transition
+			console.log('🌙 Transitioning to night phase');
+			// Don't call loadGameData() here to avoid loops
+		} else if (gameState.status === 'day') {
+			// Handle day phase transition
+			console.log('☀️ Transitioning to day phase');
+			// Don't call loadGameData() here to avoid loops
+		}
+		// ... other transitions
+	}
+
+	// Optimized admin functions with better state management
 	async function startGame() {
 		if (players.length < 3) {
 			adminMessage = 'Need at least 3 players to start the game';
 			return;
 		}
 
+		if (isProcessing) {
+			console.log('⏸️ Already processing, ignoring start game request');
+			return;
+		}
+
 		isProcessing = true;
-		adminMessage = 'Starting game and assigning roles...';
+		adminMessage = 'Initializing game and assigning roles...';
 
 		try {
-			// Call the start_game function we'll create
-			const { error } = await supabase.rpc('start_game_simple');
+			console.log('🎮 Starting game with', players.length, 'players');
 
-			if (error) throw error;
+			const { error: startError } = await supabase.rpc('start_game_simple');
 
-			adminMessage = 'Game started successfully! Roles have been assigned.';
-			await loadGameData();
+			if (startError) {
+				console.error('❌ Start game RPC error:', startError);
+				throw startError;
+			}
+
+			console.log('✅ start_game_simple() completed successfully');
+			adminMessage = 'Roles assigned! The game state will update automatically.';
+
+			// Don't manually reload here - let the subscription handle it
+			// The subscription will detect the change and call debouncedLoadGameData()
 		} catch (error: unknown) {
-			console.error('Error starting game:', error);
-			adminMessage = `Error starting game: ${error}`;
+			console.error('💥 Error starting game:', error);
+			adminMessage = `❌ Error starting game: ${error || 'Unknown error'}`;
 		} finally {
 			isProcessing = false;
 		}
 	}
 
-	//   function handlePhaseNavigation() {
-	//   if (!gameState) return;
-
-	//   // Navigate on first phase transition
-	//   if (gameState.status === 'night' || gameState.status === 'day' || gameState.status === 'voting') {
-	//     goto('/game'); // Adjust if your board route is different
-	//   }
-	// }
-
 	async function resetGame() {
-		if (
-			!confirm(
-				'Are you sure you want to reset the entire game? This will clear all players and progress.'
-			)
-		) {
+		const playerCount = players.length;
+		const gameStatus = gameState?.status || 'unknown';
+
+		const confirmMessage = `⚠️ RESET ENTIRE GAME ⚠️\n\nThis will:\n• Remove all ${playerCount} players\n• Reset status from "${gameStatus}" to "lobby"\n• Clear all roles\n\nContinue?`;
+
+		if (!confirm(confirmMessage)) return;
+
+		if (isProcessing) {
+			console.log('⏸️ Already processing, ignoring reset request');
 			return;
 		}
 
 		isProcessing = true;
-		adminMessage = 'Resetting game...';
+		adminMessage = 'Resetting entire game...';
 
 		try {
-			const { error } = await supabase.rpc('reset_game_simple');
+			console.log('🔄 Starting game reset...');
+
+			const { error: resetError } = await supabase.rpc('reset_game_simple');
+
+			if (resetError) {
+				console.error('❌ Reset game RPC error:', resetError);
+				throw resetError;
+			}
+
+			console.log('✅ reset_game_simple() completed successfully');
+			adminMessage = 'Game reset completed! State will update automatically.';
+
+			// Reset our tracking variables
+			lastKnownGameStatus = null;
+			lastKnownPlayerCount = 0;
+
+			// Don't manually reload - let subscription handle it
+		} catch (error: unknown) {
+			console.error('💥 Error resetting game:', error);
+			adminMessage = `❌ Error resetting game: ${error || 'Unknown error'}`;
+		} finally {
+			isProcessing = false;
+		}
+	}
+
+	// Optimized subscription setup
+	onMount(() => {
+		// Initial load
+		loadGameData();
+
+		// Set up real-time subscription with specific event handling
+		subscription = supabase
+			.channel('admin_channel')
+			.on(
+				'postgres_changes',
+				{ event: '*', schema: 'public', table: 'game_players' },
+				(payload) => {
+					console.log('👥 Player change detected:', payload.eventType);
+					// Use debounced loader to prevent rapid updates
+					debouncedLoadGameData();
+				}
+			)
+			.on('postgres_changes', { event: '*', schema: 'public', table: 'game_state' }, (payload) => {
+				console.log('🎮 Game state change detected:', payload.eventType, payload.new);
+				// Use debounced loader for game state changes too
+				debouncedLoadGameData();
+			})
+			.subscribe((status) => {
+				console.log('📡 Subscription status:', status);
+			});
+	});
+
+	onDestroy(() => {
+		// Clean up
+		if (loadDataTimeout) {
+			clearTimeout(loadDataTimeout);
+		}
+
+		if (subscription) {
+			console.log('🧹 Cleaning up subscription');
+			supabase.removeChannel(subscription);
+		}
+	});
+
+	// Alternative: Reset only players (keep game state)
+	async function resetPlayersOnly() {
+		const playerCount = players.length;
+
+		if (playerCount === 0) {
+			adminMessage = 'No players to remove';
+			return;
+		}
+
+		const confirmMessage = `Remove all ${playerCount} players but keep game state?
+
+This will:
+• Remove all players from the game
+• Keep current game status: "${gameState?.status || 'unknown'}"
+• Keep current phase: "${gameState?.current_phase || 'unknown'}"
+
+Continue?`;
+
+		if (!confirm(confirmMessage)) {
+			return;
+		}
+
+		isProcessing = true;
+		adminMessage = 'Removing all players...';
+
+		try {
+			console.log('👥 Removing all players...');
+
+			const { error } = await supabase
+				.from('game_players')
+				.delete()
+				.neq('id', '00000000-0000-0000-0000-000000000000'); // Delete all
+
+			if (error) {
+				console.error('❌ Delete players error:', error);
+				throw error;
+			}
+
+			console.log('✅ All players removed successfully');
+			adminMessage = 'Players removed! Reloading data...';
+
+			// Reload data
+			await loadGameData();
+
+			adminMessage = `✅ All players removed successfully! 
+      Removed ${playerCount} players. 
+      Game state unchanged: ${gameState?.status || 'lobby'}`;
+		} catch (error: unknown) {
+			console.error('💥 Error removing players:', error);
+			adminMessage = `❌ Error removing players: ${error || 'Unknown error'}`;
+		} finally {
+			isProcessing = false;
+		}
+	}
+
+	// Force game state change (for debugging)
+	async function forceGameState(newStatus: 'lobby' | 'night' | 'day' | 'voting' | 'finished') {
+		if (!confirm(`Force change game status to "${newStatus}"?`)) {
+			return;
+		}
+
+		isProcessing = true;
+		adminMessage = `Forcing game state to ${newStatus}...`;
+
+		try {
+			console.log(`🔧 Forcing game state to: ${newStatus}`);
+
+			let newPhase: string;
+			let newDay: number = gameState?.day_number || 1;
+
+			switch (newStatus) {
+				case 'lobby':
+					newPhase = 'Lobby - Waiting for Players';
+					newDay = 0;
+					break;
+				case 'night':
+					newPhase = `Night ${newDay} - The Cult Strikes`;
+					break;
+				case 'day':
+					newPhase = `Day ${newDay} - Village Discussion`;
+					break;
+				case 'voting':
+					newPhase = `Day ${newDay} - Execution Vote`;
+					break;
+				case 'finished':
+					newPhase = 'Game Over';
+					break;
+			}
+
+			const { error } = await supabase
+				.from('game_state')
+				.update({
+					status: newStatus,
+					current_phase: newPhase,
+					day_number: newDay,
+					updated_at: new Date().toISOString()
+				})
+				.eq('id', 1);
 
 			if (error) throw error;
 
-			adminMessage = 'Game reset successfully!';
 			await loadGameData();
+			adminMessage = `✅ Game state forced to: ${newStatus} | ${newPhase}`;
 		} catch (error: unknown) {
-			console.error('Error resetting game:', error);
-			adminMessage = `Error resetting game: ${error}`;
+			console.error('💥 Error forcing game state:', error);
+			adminMessage = `❌ Error: ${error || 'Unknown error'}`;
 		} finally {
 			isProcessing = false;
 		}
@@ -189,31 +455,35 @@
 		}
 	}
 
-	onMount(() => {
-		loadGameData();
+	// onMount(() => {
+	// 	loadGameData();
 
-		// Set up real-time subscription
-		subscription = supabase
-			.channel('admin_channel')
-			.on('postgres_changes', { event: '*', schema: 'public', table: 'game_players' }, () =>
-				loadGameData()
-			)
-			.on('postgres_changes', { event: '*', schema: 'public', table: 'game_state' }, () =>
-				loadGameData()
-			)
-			.subscribe();
-	});
+	// 	// Set up real-time subscription
+	// 	subscription = supabase
+	// 		.channel('admin_channel')
+	// 		.on('postgres_changes', { event: '*', schema: 'public', table: 'game_players' }, () =>
+	// 			loadGameData()
+	// 		)
+	// 		.on('postgres_changes', { event: '*', schema: 'public', table: 'game_state' }, () =>
+	// 			loadGameData()
+	// 		)
+	// 		.subscribe();
+	// });
 
-	onDestroy(() => {
-		if (subscription) {
-			supabase.removeChannel(subscription);
-		}
-	});
+	// onDestroy(() => {
+	// 	if (subscription) {
+	// 		supabase.removeChannel(subscription);
+	// 	}
+	// });
 </script>
 
 <svelte:head>
 	<title>Storyteller Control - Village of Shadows</title>
 </svelte:head>
+
+{#if adminMessage}
+	<p class="admin-message">{adminMessage}</p>
+{/if}
 
 <!-- Clean Admin Container -->
 <div class="admin-container">
@@ -232,57 +502,13 @@
 			</nav>
 		</header>
 
-		<!-- Game Status Overview -->
-		<section class="admin-panel">
-			<h2 class="panel-title">🎮 Game Overview</h2>
-
-			{#if gameState}
-				<div class="status-grid">
-					<div class="status-card">
-						<label class="status-label">Status</label>
-						<span
-							class="status-badge"
-							style="background-color: {getGameStatusColor(gameState.status)}"
-						>
-							{gameState.status.toUpperCase()}
-						</span>
-					</div>
-					<div class="status-card">
-						<label class="status-label">Phase</label>
-						<span class="status-value">{gameState.current_phase}</span>
-					</div>
-					<div class="status-card">
-						<label class="status-label">Day</label>
-						<span class="status-value">{gameState.day_number}</span>
-					</div>
-					<div class="status-card">
-						<label class="status-label">Players</label>
-						<span class="status-value"
-							>{players.length} total, {players.filter((p) => p.is_alive).length} alive</span
-						>
-					</div>
-				</div>
-			{:else}
-				<div class="alert warning">
-					<span class="alert-icon">⚠️</span>
-					<span>No game state found. Game may need to be initialized.</span>
-				</div>
-			{/if}
-
-			{#if adminMessage}
-				<div class="alert info">
-					<span class="alert-icon">ℹ️</span>
-					<span>{adminMessage}</span>
-				</div>
-			{/if}
-		</section>
-
-		<!-- Game Controls -->
+		<!-- Enhanced Game Controls Section for Admin Panel -->
 		<section class="admin-panel">
 			<h2 class="panel-title">🎛️ Game Controls</h2>
 
 			<div class="control-section">
 				{#if !gameState || gameState.status === 'lobby'}
+					<!-- Start Game Button -->
 					<button
 						class="control-btn primary large"
 						on:click={startGame}
@@ -300,6 +526,7 @@
 						{/if}
 					</button>
 				{:else}
+					<!-- Game Active Status -->
 					<div class="game-status-active">
 						<div
 							class="status-indicator"
@@ -307,15 +534,93 @@
 						></div>
 						<div>
 							<h3>Game Running</h3>
-							<p>Currently in <strong>{gameState.status}</strong> phase</p>
+							<p>Status: <strong>{gameState.status.toUpperCase()}</strong></p>
+							<p>Phase: <strong>{gameState.current_phase}</strong></p>
+							<p>Day: <strong>{gameState.day_number}</strong></p>
 						</div>
+					</div>
+
+					<!-- Phase Control Buttons (if game is running) -->
+					<div class="phase-controls">
+						<button
+							class="control-btn secondary"
+							on:click={() => forceGameState('night')}
+							disabled={isProcessing}
+						>
+							<span class="btn-icon">🌙</span>
+							Force Night Phase
+						</button>
+
+						<button
+							class="control-btn secondary"
+							on:click={() => forceGameState('day')}
+							disabled={isProcessing}
+						>
+							<span class="btn-icon">☀️</span>
+							Force Day Phase
+						</button>
+
+						<button
+							class="control-btn secondary"
+							on:click={() => forceGameState('voting')}
+							disabled={isProcessing}
+						>
+							<span class="btn-icon">🗳️</span>
+							Force Voting Phase
+						</button>
 					</div>
 				{/if}
 
-				<button class="control-btn danger" on:click={resetGame} disabled={isProcessing}>
-					<span class="btn-icon">🔄</span>
-					Reset Game
-				</button>
+				<!-- Reset Controls -->
+				<div class="reset-controls">
+					<h4 style="color: #f8fafc; margin: 1.5rem 0 1rem 0; font-size: 1.1rem;">
+						⚠️ Reset Options
+					</h4>
+
+					<div class="reset-buttons">
+						<button class="control-btn danger" on:click={resetGame} disabled={isProcessing}>
+							<span class="btn-icon">🔄</span>
+							Full Game Reset
+						</button>
+
+						<button
+							class="control-btn warning"
+							on:click={resetPlayersOnly}
+							disabled={isProcessing || players.length === 0}
+						>
+							<span class="btn-icon">👥</span>
+							Clear Players Only
+						</button>
+
+						<button
+							class="control-btn info"
+							on:click={() => forceGameState('lobby')}
+							disabled={isProcessing}
+						>
+							<span class="btn-icon">🏠</span>
+							Force Lobby State
+						</button>
+					</div>
+				</div>
+
+				<!-- Debug Controls -->
+				<div class="debug-controls">
+					<h4 style="color: #f8fafc; margin: 1.5rem 0 1rem 0; font-size: 1.1rem;">
+						🔧 Debug Tools
+					</h4>
+
+					<div class="debug-buttons">
+						<button class="control-btn debug" on:click={loadGameData} disabled={isProcessing}>
+							<span class="btn-icon">🔄</span>
+							Reload Data
+						</button>
+
+						<button class="control-btn debug" on:click={() => goto('/game')}>
+							<span class="btn-icon">🎮</span>
+							Go to Game Board
+						</button>
+					</div>
+				</div>
 			</div>
 		</section>
 
