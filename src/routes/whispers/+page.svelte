@@ -2,40 +2,28 @@
 	import { onMount, onDestroy } from 'svelte';
 	import { goto } from '$app/navigation';
 	import { supabase } from '$lib/supabase';
-	import type { RealtimeChannel } from '@supabase/supabase-js';
+	import { gameStore, players, gameState, connectionStatus, messages } from '$lib/stores/gameState';
 
-	// let isLoadingPlayers = false;
-	// let isLoadingGameState = false;
-	// let lastKnownGameStatus: string | null = null;
-	// let lastKnownPlayerCount = 0;
-	// let loadDataTimeout: NodeJS.Timeout | null = null;
-	// const DEBOUNCE_MS = 100;
-
-	interface GamePlayer {
-		id: string;
-		name: string;
-		affiliation: 'cult' | 'townsfolk' | null;
-		character: string | null;
-		joined_at: string;
-		is_alive: boolean;
-	}
-
-	interface GameState {
-		id: number;
-		status: 'lobby' | 'night' | 'day' | 'voting' | 'finished';
-		current_phase: string;
-		day_number: number;
-		created_at: string;
-		updated_at: string;
-	}
-
+	// Local state
 	let playerName = '';
-	let players: GamePlayer[] = [];
-	let gameState: GameState | null = null;
 	let isJoining = false;
 	let joinMessage = '';
-	let subscription: RealtimeChannel | null = null;
+	let currentPlayerId: string | null = null;
 
+	// Reactive subscriptions
+	$: allPlayers = $players;
+	$: currentGameState = $gameState;
+	$: connection = $connectionStatus;
+	$: allMessages = $messages;
+
+	// Reactive game status
+	$: gameHasStarted = currentGameState && currentGameState.status !== 'lobby';
+	$: isGameActive =
+		currentGameState?.status &&
+		currentGameState.status !== 'lobby' &&
+		currentGameState.status !== 'finished';
+
+	// Join game function
 	async function joinGame() {
 		console.log('🎮 Attempting to join game with name:', playerName);
 
@@ -45,7 +33,7 @@
 		}
 
 		// Check if name is already taken
-		if (players.some((p) => p.name.toLowerCase() === playerName.toLowerCase())) {
+		if (allPlayers.some((p) => p.name.toLowerCase() === playerName.toLowerCase())) {
 			joinMessage = 'This name is already taken';
 			return;
 		}
@@ -54,18 +42,22 @@
 		joinMessage = '';
 
 		try {
+			const playerId = crypto.randomUUID();
+
 			console.log('📡 Inserting player into database...');
 			const { data, error } = await supabase
 				.from('game_players')
 				.insert([
 					{
+						id: playerId,
 						name: playerName.trim(),
-						affiliation: null, // Will be assigned when admin starts game
+						affiliation: null,
 						character: null,
 						is_alive: true
 					}
 				])
-				.select();
+				.select()
+				.single();
 
 			if (error) {
 				console.error('❌ Database error:', error);
@@ -73,10 +65,25 @@
 			}
 
 			console.log('✅ Player inserted successfully:', data);
-			joinMessage = `${data[0].name} joined the village!`;
+
+			// Store player info
+			currentPlayerId = playerId;
+			localStorage.setItem('playerId', playerId);
+			localStorage.setItem('playerName', playerName);
+
+			// Send system message
+			await gameStore.sendMessage(
+				`${playerName} has joined the village!`,
+				playerId,
+				playerName,
+				true
+			);
+
+			joinMessage = `Welcome to the village, ${playerName}!`;
 			playerName = '';
 
-			await loadGameData();
+			// Clear message after 3 seconds
+			setTimeout(() => (joinMessage = ''), 3000);
 		} catch (error: unknown) {
 			console.error('💥 Join game error:', error);
 			joinMessage = `Error: ${error instanceof Error ? error.message : 'Unknown error'}`;
@@ -85,95 +92,154 @@
 		}
 	}
 
-	async function loadGameData() {
-		console.log('📊 Loading game data...');
-		try {
-			// Load players
-			const { data: playersData, error: playersError } = await supabase
-				.from('game_players')
-				.select('*')
-				.order('joined_at', { ascending: true });
-
-			if (playersError) {
-				console.error('❌ Load players error:', playersError);
-				throw playersError;
-			}
-
-			console.log('📋 Players loaded:', playersData);
-			players = playersData || [];
-
-			// Load game state
-			const { data: stateData, error: stateError } = await supabase
-				.from('game_state')
-				.select('*')
-				.single();
-
-			if (stateError) {
-				// Ignore "no rows" error - game hasn't started yet
-				if (
-					stateError.code !== 'PGRST116' &&
-					!stateError.message.includes('Results contain 0 rows')
-				) {
-					throw stateError;
-				}
-				gameState = null;
-			} else {
-				gameState = stateData;
-				// Check if we should navigate to game board
-				checkForGameTransition();
-			}
-		} catch (error) {
-			console.error('💥 Error loading game data:', error);
-		}
-	}
-
+	// Check for game transition
 	function checkForGameTransition() {
-		// If game has started (status is no longer lobby), navigate to game board
-		if (gameState && gameState.status !== 'lobby') {
-			console.log('🎮 Game has started! Navigating to game board...');
-			goto('/whispers/game'); // Adjust path as needed
+		// If game has started and we have a player ID, navigate to game board
+		if (gameHasStarted && currentPlayerId) {
+			const player = allPlayers.find((p) => p.id === currentPlayerId);
+			if (player) {
+				console.log('🎮 Game has started! Navigating to game board...');
+				goto('/game'); // Adjust path as needed
+			}
 		}
 	}
 
+	// Watch for game state changes
+	$: if (currentGameState) {
+		checkForGameTransition();
+	}
+
+	// Initialize on mount
 	onMount(() => {
-		loadGameData();
+		// Listen for phase changes
+		const handlePhaseChange = (event: Event) => {
+			const customEvent = event as CustomEvent;
 
-		// Set up real-time subscription for both players and game state
-		subscription = supabase
-			.channel('lobby_channel')
-			.on('postgres_changes', { event: '*', schema: 'public', table: 'game_players' }, () => {
-				console.log('🔄 Player data changed, reloading...');
-				loadGameData();
-			})
-			.on('postgres_changes', { event: '*', schema: 'public', table: 'game_state' }, (payload) => {
-				console.log('🎮 Game state changed:', payload);
-				loadGameData(); // This will trigger checkForGameTransition
-			})
-			.subscribe();
+			console.log('📢 Game phase changed:', customEvent.detail);
+			const { newPhase, oldPhase } = customEvent.detail;
+
+			if (oldPhase === 'lobby' && newPhase !== 'lobby') {
+				joinMessage = '🌙 The game has begun! Redirecting...';
+				setTimeout(() => checkForGameTransition(), 1000);
+			}
+		};
+
+		window.addEventListener('gamePhaseChange', handlePhaseChange);
+
+		// Run the async logic separately
+		(async () => {
+			await gameStore.initialize();
+
+			const savedId = localStorage.getItem('playerId');
+			const savedName = localStorage.getItem('playerName');
+
+			if (savedId && savedName) {
+				const currentPlayers = $players;
+
+				const playerExists = currentPlayers.some((p) => p.id === savedId);
+				if (playerExists) {
+					currentPlayerId = savedId;
+					console.log('🔄 Restored player session:', savedName);
+					checkForGameTransition();
+				} else {
+					localStorage.removeItem('playerId');
+					localStorage.removeItem('playerName');
+					console.log('🗑️ Cleared invalid session for:', savedName);
+				}
+			}
+		})();
+
+		// Return a synchronous cleanup function only
+		return () => {
+			window.removeEventListener('gamePhaseChange', handlePhaseChange);
+		};
 	});
 
+	// onMount(async () => {
+	// 	// Initialize game store first
+	// 	await gameStore.initialize();
+
+	// 	// Now check for existing player after store is initialized
+	// 	const savedId = localStorage.getItem('playerId');
+	// 	const savedName = localStorage.getItem('playerName');
+
+	// 	if (savedId && savedName) {
+	// 		// Get current players from the store
+	// 		const currentPlayers = $players;
+
+	// 		// Verify player still exists
+	// 		const playerExists = currentPlayers.some((p) => p.id === savedId);
+	// 		if (playerExists) {
+	// 			currentPlayerId = savedId;
+	// 			console.log('🔄 Restored player session:', savedName);
+	// 			// Check if should redirect to game
+	// 			checkForGameTransition();
+	// 		} else {
+	// 			// Clear invalid session
+	// 			localStorage.removeItem('playerId');
+	// 			localStorage.removeItem('playerName');
+	// 			console.log('🗑️ Cleared invalid session for:', savedName);
+	// 		}
+	// 	}
+
+	// 	// Listen for phase changes
+	// 	const handlePhaseChange = (event: CustomEvent) => {
+	// 		console.log('📢 Game phase changed:', event.detail);
+	// 		const { newPhase, oldPhase } = event.detail;
+
+	// 		// Show join message about game starting
+	// 		if (oldPhase === 'lobby' && newPhase !== 'lobby') {
+	// 			joinMessage = '🌙 The game has begun! Redirecting...';
+	// 			setTimeout(() => checkForGameTransition(), 1000);
+	// 		}
+	// 	};
+
+	// 	window.addEventListener('gamePhaseChange', handlePhaseChange);
+
+	// 	return () => {
+	// 		window.removeEventListener('gamePhaseChange', handlePhaseChange);
+	// 	};
+	// });
+
+	// Cleanup on destroy
 	onDestroy(() => {
-		if (subscription) {
-			supabase.removeChannel(subscription);
-		}
+		gameStore.cleanup();
 	});
-</script>
 
-<!-- Complete fixed template with proper structure -->
+	// Format time helper
+	function formatJoinTime(timestamp: string): string {
+		return new Date(timestamp).toLocaleTimeString('en-US', {
+			hour: 'numeric',
+			minute: '2-digit'
+		});
+	}
+</script>
 
 <svelte:head>
 	<title>Village of Shadows - Game Lobby</title>
 </svelte:head>
 
+<!-- Connection Status Bar -->
+{#if connection !== 'connected'}
+	<div class="connection-bar" class:error={connection === 'error'}>
+		{#if connection === 'connecting'}
+			🔄 Connecting to village...
+		{:else if connection === 'error'}
+			❌ Connection lost - please refresh
+		{:else}
+			⚠️ Disconnected from village
+		{/if}
+	</div>
+{/if}
+
 <!-- Game Container with Isolated Styles -->
 <div class="game-container">
 	<!-- Blood Particles -->
 	<div class="blood-particles">
-		<div class="blood-drop"></div>
-		<div class="blood-drop"></div>
-		<div class="blood-drop"></div>
-		<div class="blood-drop"></div>
-		<div class="blood-drop"></div>
+		<!-- eslint-disable-next-line @typescript-eslint/no-unused-vars -->
+		{#each Array(5) as _, i (i)}
+			<div class="blood-drop"></div>
+		{/each}
 	</div>
 
 	<main class="container">
@@ -187,78 +253,102 @@
 		</header>
 
 		<!-- Join Game Section -->
-		<section class="village-panel join-game-section">
-			<h3>🏘️ Enter the Village</h3>
-			<p class="join-description">
-				State your name and join the survivors. Trust no one—the cult walks among you.
-			</p>
+		{#if !currentPlayerId}
+			<section class="village-panel join-game-section">
+				<h3>🏘️ Enter the Village</h3>
+				<p class="join-description">
+					State your name and join the survivors. Trust no one—the cult walks among you.
+				</p>
 
-			<form on:submit|preventDefault={joinGame} class="join-form">
-				<div class="form-group">
-					<label for="name">Your Name</label>
-					<input
-						id="name"
-						type="text"
-						bind:value={playerName}
-						placeholder="Enter your name..."
-						required
-						class="dark-input"
-						disabled={isJoining}
-						maxlength="20"
-					/>
-				</div>
-
-				<button
-					type="submit"
-					disabled={isJoining || !playerName.trim()}
-					class="cult-button"
-					class:loading={isJoining}
-				>
-					{isJoining ? 'Entering Village...' : 'Join the Village'}
-				</button>
-
-				{#if joinMessage}
-					<div
-						class="join-message"
-						class:success={joinMessage.includes('joined')}
-						class:error={joinMessage.includes('Error') || joinMessage.includes('taken')}
-						class:info={joinMessage.includes('cleared')}
-					>
-						{joinMessage}
+				<form on:submit|preventDefault={joinGame} class="join-form">
+					<div class="form-group">
+						<label for="name">Your Name</label>
+						<input
+							id="name"
+							type="text"
+							bind:value={playerName}
+							placeholder="Enter your name..."
+							required
+							class="dark-input"
+							disabled={isJoining}
+							maxlength="20"
+						/>
 					</div>
-				{/if}
-			</form>
-		</section>
 
-		<!-- Updated Villagers Gathered Section -->
+					<button
+						type="submit"
+						disabled={isJoining || !playerName.trim()}
+						class="cult-button"
+						class:loading={isJoining}
+					>
+						{isJoining ? 'Entering Village...' : 'Join the Village'}
+					</button>
+
+					{#if joinMessage}
+						<div
+							class="join-message"
+							class:success={joinMessage.includes('Welcome') || joinMessage.includes('joined')}
+							class:error={joinMessage.includes('Error') || joinMessage.includes('taken')}
+							class:info={joinMessage.includes('🌙')}
+						>
+							{joinMessage}
+						</div>
+					{/if}
+				</form>
+			</section>
+		{:else}
+			<!-- Already Joined Message -->
+			<section class="village-panel welcome-section">
+				<h3>✨ You're in the Village</h3>
+				<p class="welcome-text">
+					Welcome back, {localStorage.getItem('playerName')}!
+					{#if gameHasStarted}
+						The game has begun...
+					{:else}
+						Waiting for the Storyteller to begin...
+					{/if}
+				</p>
+				{#if gameHasStarted}
+					<button class="cult-button" on:click={() => goto('/game')}> 🎮 Enter Game </button>
+				{/if}
+			</section>
+		{/if}
+
+		<!-- Villagers Gathered Section -->
 		<section class="village-panel">
 			<div class="lobby-header">
 				<h3>👥 Villagers Gathered</h3>
 				<div class="player-counter">
-					<span class="count">{players.length}</span> souls in the village
+					<span class="count">{allPlayers.length}</span>
+					{allPlayers.length === 1 ? 'soul' : 'souls'} in the village
 				</div>
 			</div>
 
-			{#if players.length === 0}
+			{#if allPlayers.length === 0}
 				<div class="empty-lobby">
 					<p>The village lies empty and silent...</p>
 					<p class="whisper">Waiting for brave souls to arrive...</p>
 				</div>
 			{:else}
 				<div class="players-grid">
-					{#each players as player (player.id)}
-						<div class="player-card">
+					{#each allPlayers as player (player.id)}
+						<div class="player-card" class:self={player.id === currentPlayerId}>
 							<div class="player-avatar">
 								{player.name.charAt(0).toUpperCase()}
 							</div>
 							<div class="player-info">
-								<h4 class="player-name">{player.name}</h4>
+								<h4 class="player-name">
+									{player.name}
+									{#if player.id === currentPlayerId}
+										<span class="you-badge">(You)</span>
+									{/if}
+								</h4>
 								<p class="join-time">
-									Arrived {new Date(player.joined_at).toLocaleTimeString()}
+									Arrived {formatJoinTime(player.joined_at)}
 								</p>
-								{#if player.affiliation}
+								{#if player.affiliation && isGameActive}
 									<p class="player-role">
-										{player.affiliation} - {player.character || 'Role assigned'}
+										{player.character || 'Role assigned'}
 									</p>
 								{/if}
 							</div>
@@ -269,38 +359,49 @@
 					{/each}
 				</div>
 
+				<!-- Lobby Status -->
 				<div class="lobby-status">
-					{#if gameState?.status === 'lobby'}
+					{#if currentGameState?.status === 'lobby' || !currentGameState}
 						<div class="waiting-message">
 							<div class="status-indicator pulsing"></div>
 							<div>
 								<h4>Waiting for Storyteller</h4>
-								<p>The game master will begin when ready... ({players.length} players joined)</p>
+								<p>
+									{#if allPlayers.length < 3}
+										Need {3 - allPlayers.length} more {3 - allPlayers.length === 1
+											? 'player'
+											: 'players'} to start
+									{:else}
+										The game master will begin when ready... ({allPlayers.length} players ready)
+									{/if}
+								</p>
 							</div>
 						</div>
-					{:else if !gameState}
-						<div class="waiting-message">
-							<div class="status-indicator pulsing"></div>
-							<div>
-								<h4>Lobby Open</h4>
-								<p>Gathering villagers... The storyteller will begin soon.</p>
-							</div>
-						</div>
-					{:else}
+					{:else if isGameActive}
 						<div class="starting-message">
 							<div class="status-indicator starting"></div>
 							<div>
-								<h4>Game Starting!</h4>
-								<p>The storyteller has begun the tale. Roles are being assigned...</p>
-								<p style="font-size: 0.8rem; margin-top: 0.5rem;">Redirecting to game board...</p>
+								<h4>Game In Progress!</h4>
+								<p>{currentGameState.current_phase}</p>
+								{#if currentPlayerId}
+									<p style="font-size: 0.8rem; margin-top: 0.5rem;">
+										<a href="/game" style="color: #ff6b6b;">→ Join the game</a>
+									</p>
+								{/if}
+							</div>
+						</div>
+					{:else if currentGameState?.status === 'finished'}
+						<div class="finished-message">
+							<div class="status-indicator finished"></div>
+							<div>
+								<h4>Game Over</h4>
+								<p>The tale has ended... for now.</p>
 							</div>
 						</div>
 					{/if}
 
-					<!-- Admin and utility buttons -->
-					<div
-						style="display: flex; gap: 1rem; flex-wrap: wrap; justify-content: center; margin-top: 1rem;"
-					>
+					<!-- Admin Link -->
+					<div class="admin-controls">
 						<button class="admin-link-btn" on:click={() => goto('/admin')}>
 							🎭 Storyteller Panel
 						</button>
@@ -309,43 +410,68 @@
 			{/if}
 		</section>
 
-		<!-- Debug Section (remove in production) -->
-		<section class="village-panel">
-			<div class="debug-info">
-				<p><strong>Debug Info:</strong></p>
-				<p>Players count: {players.length}</p>
-				<p>Game state: {gameState ? `${gameState.status} (${gameState.current_phase})` : 'null'}</p>
-				<p>Is joining: {isJoining}</p>
-				<p>Join message: {joinMessage || 'None'}</p>
-				<p>Subscription active: {subscription ? 'Yes' : 'No'}</p>
-			</div>
-		</section>
+		<!-- Recent Activity (showing recent join messages) -->
+		{#if allMessages.length > 0}
+			<section class="village-panel activity-panel">
+				<h3>📜 Village Activity</h3>
+				<div class="activity-list">
+					{#each allMessages.slice(-5).reverse() as message (message.id)}
+						{#if message.is_system && message.content.includes('joined')}
+							<div class="activity-item">
+								<span class="activity-time">
+									{formatJoinTime(message.timestamp)}
+								</span>
+								<span class="activity-content">
+									{message.content}
+								</span>
+							</div>
+						{/if}
+					{/each}
+				</div>
+			</section>
+		{/if}
 	</main>
 </div>
 
 <style>
-	/* ==========================================================================
-     CULT VILLAGE HORROR GAME - COMPONENT SCOPED STYLES
-     ========================================================================== */
+	/* Connection Status Bar */
+	.connection-bar {
+		position: fixed;
+		top: 0;
+		left: 0;
+		right: 0;
+		background: rgba(59, 130, 246, 0.95);
+		color: white;
+		padding: 0.5rem;
+		text-align: center;
+		font-weight: 500;
+		z-index: 1000;
+		animation: slideDown 0.3s ease-out;
+		backdrop-filter: blur(10px);
+	}
 
-	/* Main Game Container - Enhanced with proper theming */
+	.connection-bar.error {
+		background: rgba(239, 68, 68, 0.95);
+	}
+
+	@keyframes slideDown {
+		from {
+			transform: translateY(-100%);
+			opacity: 0;
+		}
+		to {
+			transform: translateY(0);
+			opacity: 1;
+		}
+	}
+
+	/* Main Game Container */
 	.game-container {
-		/* Reset any inherited styles */
 		all: initial;
 		display: block;
-
-		/* Enhanced Dark Village Atmosphere */
 		background:
 			radial-gradient(ellipse at top center, #1a1a2e 0%, #16213e 25%, #0f0f23 55%, #000000 100%),
-			linear-gradient(135deg, #0a0a0f 0%, #1a1320 30%, #2d1b2e 60%, #1a0a1a 80%, #000000 100%),
-			conic-gradient(
-				from 180deg at 50% 0%,
-				transparent 0deg,
-				rgba(139, 0, 0, 0.02) 90deg,
-				transparent 180deg,
-				rgba(25, 25, 112, 0.01) 270deg,
-				transparent 360deg
-			);
+			linear-gradient(135deg, #0a0a0f 0%, #1a1320 30%, #2d1b2e 60%, #1a0a1a 80%, #000000 100%);
 		background-attachment: fixed;
 		min-height: 100vh;
 		position: relative;
@@ -353,19 +479,15 @@
 		font-family: 'Georgia', 'Times New Roman', serif;
 		color: #e2e8f0;
 		box-sizing: border-box;
-
-		/* Enhanced visual depth */
-		backdrop-filter: blur(0.5px);
 	}
 
-	/* Ensure all child elements use border-box */
 	.game-container *,
 	.game-container *::before,
 	.game-container *::after {
 		box-sizing: border-box;
 	}
 
-	/* Enhanced Creeping Fog Effect */
+	/* Fog Effects */
 	.game-container::before {
 		content: '';
 		position: fixed;
@@ -373,61 +495,18 @@
 		left: -60%;
 		width: 220%;
 		height: 400px;
-		background:
-			radial-gradient(
-				ellipse 80% 100% at center bottom,
-				rgba(139, 137, 137, 0.08) 0%,
-				rgba(105, 105, 105, 0.04) 40%,
-				transparent 70%
-			),
-			radial-gradient(ellipse 60% 80% at 20% 80%, rgba(169, 169, 169, 0.03) 0%, transparent 60%),
-			radial-gradient(ellipse 40% 60% at 80% 90%, rgba(105, 105, 105, 0.05) 0%, transparent 50%),
-			linear-gradient(0deg, rgba(20, 20, 40, 0.1) 0%, transparent 60%);
-		animation:
-			creepingFog 30s ease-in-out infinite,
-			fogDrift 50s linear infinite,
-			fogPulse 20s ease-in-out infinite;
+		background: radial-gradient(
+			ellipse 80% 100% at center bottom,
+			rgba(139, 137, 137, 0.08) 0%,
+			transparent 70%
+		);
+		animation: creepingFog 30s ease-in-out infinite;
 		pointer-events: none;
 		z-index: 0;
 		opacity: 0.6;
 	}
 
-	/* Enhanced Ominous Shadows */
-	.game-container::after {
-		content: '';
-		position: fixed;
-		top: -30%;
-		right: -40%;
-		width: 100%;
-		height: 140%;
-		background:
-			radial-gradient(
-				ellipse 60% 80% at center,
-				transparent 20%,
-				rgba(139, 0, 0, 0.02) 40%,
-				rgba(64, 0, 0, 0.03) 60%,
-				transparent 80%
-			),
-			conic-gradient(
-				from 45deg at 30% 70%,
-				transparent 0deg,
-				rgba(139, 0, 0, 0.03) 60deg,
-				transparent 120deg,
-				rgba(25, 25, 112, 0.02) 180deg,
-				transparent 240deg,
-				rgba(64, 0, 0, 0.02) 300deg,
-				transparent 360deg
-			),
-			linear-gradient(45deg, transparent 0%, rgba(20, 20, 40, 0.02) 50%, transparent 100%);
-		animation:
-			ominousShadows 80s ease-in-out infinite,
-			shadowDrift 60s linear infinite reverse;
-		pointer-events: none;
-		z-index: 0;
-		opacity: 0.4;
-	}
-
-	/* Enhanced Blood Particles */
+	/* Blood Particles */
 	.blood-particles {
 		position: fixed;
 		top: 0;
@@ -443,14 +522,11 @@
 		position: absolute;
 		width: 2px;
 		height: 6px;
-		background:
-			radial-gradient(
-				ellipse 100% 80%,
-				rgba(139, 0, 0, 0.8) 0%,
-				rgba(75, 0, 0, 0.6) 50%,
-				rgba(139, 0, 0, 0.3) 100%
-			),
-			linear-gradient(180deg, rgba(139, 0, 0, 0.9) 0%, rgba(75, 0, 0, 0.4) 100%);
+		background: radial-gradient(
+			ellipse 100% 80%,
+			rgba(139, 0, 0, 0.8) 0%,
+			rgba(75, 0, 0, 0.4) 100%
+		);
 		border-radius: 50% 50% 50% 50% / 60% 60% 40% 40%;
 		animation: bloodFall 18s infinite linear;
 		filter: blur(0.3px);
@@ -481,288 +557,66 @@
 		animation-delay: -16s;
 		animation-duration: 21s;
 	}
-	.blood-drop:nth-child(6) {
-		left: 90%;
-		animation-delay: -2s;
-		animation-duration: 15s;
-	}
 
-	/* Enhanced Main Container */
+	/* Main Container */
 	.container {
 		max-width: 1400px;
 		margin: 0 auto;
 		padding: 2.5rem;
-		color: #e2e8f0;
 		position: relative;
 		z-index: 1;
-		background: linear-gradient(
-			135deg,
-			rgba(15, 23, 42, 0.1) 0%,
-			transparent 50%,
-			rgba(30, 41, 59, 0.05) 100%
-		);
-		border-radius: 24px;
-		margin-top: 1rem;
-		margin-bottom: 1rem;
-		backdrop-filter: blur(2px);
-		box-shadow:
-			0 0 60px rgba(0, 0, 0, 0.3),
-			inset 0 1px 0 rgba(255, 255, 255, 0.05),
-			inset 0 -1px 0 rgba(0, 0, 0, 0.2);
 	}
 
-	/* Enhanced Debug Panel */
-	.debug-info {
-		background:
-			linear-gradient(
-				135deg,
-				rgba(15, 23, 42, 0.95) 0%,
-				rgba(30, 41, 59, 0.9) 50%,
-				rgba(51, 65, 85, 0.85) 100%
-			),
-			radial-gradient(circle at top right, rgba(139, 0, 0, 0.1) 0%, transparent 40%),
-			radial-gradient(circle at bottom left, rgba(25, 25, 112, 0.08) 0%, transparent 40%);
-		border: 2px solid rgba(100, 116, 139, 0.3);
-		border-radius: 16px;
-		padding: 1.5rem;
-		margin-bottom: 1.5rem;
-		font-size: 0.9rem;
-		color: #cbd5e1;
-		font-family: 'Consolas', 'Monaco', 'Courier New', monospace;
-		position: relative;
-		overflow: hidden;
-		box-shadow:
-			0 8px 32px rgba(0, 0, 0, 0.4),
-			inset 0 1px 0 rgba(255, 255, 255, 0.1),
-			inset 0 -1px 0 rgba(0, 0, 0, 0.2);
-		backdrop-filter: blur(12px);
-		transition: all 0.3s ease;
-	}
-
-	.debug-info::before {
-		content: '';
-		position: absolute;
-		top: 0;
-		left: 0;
-		width: 100%;
-		height: 100%;
-		background: linear-gradient(
-			45deg,
-			transparent 0%,
-			rgba(100, 116, 139, 0.03) 25%,
-			transparent 50%,
-			rgba(139, 0, 0, 0.02) 75%,
-			transparent 100%
-		);
-		z-index: -1;
-		animation: debugShimmer 8s ease-in-out infinite;
-	}
-
-	.debug-info:hover {
-		border-color: rgba(139, 0, 0, 0.4);
-		box-shadow:
-			0 12px 40px rgba(0, 0, 0, 0.5),
-			0 0 20px rgba(139, 0, 0, 0.2),
-			inset 0 1px 0 rgba(255, 255, 255, 0.15);
-		transform: translateY(-2px);
-	}
-
-	.debug-info p {
-		margin: 0.75rem 0;
-		line-height: 1.5;
+	/* Header */
+	header {
 		display: flex;
+		justify-content: space-between;
 		align-items: center;
-		gap: 0.75rem;
+		margin-bottom: 2rem;
 	}
 
-	.debug-info p strong {
-		color: #f1f5f9;
-		font-weight: 700;
-		min-width: 120px;
-		text-transform: uppercase;
-		font-size: 0.8rem;
+	.game-logo h1 {
+		margin: 0;
+		font-size: 2.5rem;
+		font-weight: 900;
 		letter-spacing: 0.05em;
-		background: linear-gradient(135deg, rgba(139, 0, 0, 0.2), rgba(25, 25, 112, 0.1));
-		padding: 0.25rem 0.5rem;
-		border-radius: 6px;
-		border: 1px solid rgba(139, 0, 0, 0.3);
+		background: linear-gradient(135deg, #8b0000, #dc143c, #8b0000);
+		-webkit-background-clip: text;
+		-webkit-text-fill-color: transparent;
+		background-clip: text;
+		text-shadow: 0 0 40px rgba(139, 0, 0, 0.6);
+		animation: subtleGlow 4s ease-in-out infinite;
 	}
 
-	.debug-info p:first-child strong {
-		background: linear-gradient(135deg, rgba(139, 0, 0, 0.3), rgba(25, 25, 112, 0.2));
-		color: #fef2f2;
-		border-color: rgba(139, 0, 0, 0.4);
-		font-size: 0.9rem;
-		font-weight: 800;
+	.game-subtitle {
+		font-size: 1rem;
+		color: #8b8680;
+		font-style: italic;
+		margin-top: 0.25rem;
 	}
 
-	/* Debug value styling */
-	.debug-info p:not(:first-child) {
-		font-family: 'SF Mono', 'Monaco', 'Inconsolata', 'Roboto Mono', monospace;
-		background: rgba(0, 0, 0, 0.2);
-		padding: 0.75rem;
+	.back-btn {
+		background: rgba(255, 255, 255, 0.05);
+		border: 1px solid rgba(255, 255, 255, 0.2);
+		color: #cbd5e1;
+		padding: 0.75rem 1.5rem;
 		border-radius: 8px;
-		border-left: 3px solid rgba(139, 0, 0, 0.4);
-		margin-left: 0.5rem;
-		margin-right: 0.5rem;
+		cursor: pointer;
+		transition: all 0.3s ease;
+		font-family: inherit;
 	}
 
-	/* Status indicators for debug values */
-	.debug-info p:nth-child(2)::after {
-		/* Players count */
-		content: '👥';
-		font-size: 1.1rem;
+	.back-btn:hover {
+		background: rgba(255, 255, 255, 0.1);
+		border-color: rgba(255, 255, 255, 0.3);
+		transform: translateY(-1px);
 	}
 
-	.debug-info p:nth-child(3)::after {
-		/* Game state */
-		content: '🎮';
-		font-size: 1.1rem;
-	}
-
-	.debug-info p:nth-child(4)::after {
-		/* Is joining */
-		content: '🚪';
-		font-size: 1.1rem;
-	}
-
-	.debug-info p:nth-child(5)::after {
-		/* Join message */
-		content: '💬';
-		font-size: 1.1rem;
-	}
-
-	.debug-info p:nth-child(6)::after {
-		/* Subscription */
-		content: '📡';
-		font-size: 1.1rem;
-	}
-
-	/* Enhanced Animations */
-	@keyframes creepingFog {
-		0%,
-		100% {
-			opacity: 0.4;
-			transform: scaleX(1) scaleY(0.8);
-		}
-		33% {
-			opacity: 0.7;
-			transform: scaleX(1.3) scaleY(1.1);
-		}
-		66% {
-			opacity: 0.5;
-			transform: scaleX(0.9) scaleY(1.2);
-		}
-	}
-
-	@keyframes fogDrift {
-		0% {
-			transform: translateX(-30%) rotate(-2deg);
-		}
-		50% {
-			transform: translateX(10%) rotate(1deg);
-		}
-		100% {
-			transform: translateX(30%) rotate(-1deg);
-		}
-	}
-
-	@keyframes fogPulse {
-		0%,
-		100% {
-			filter: blur(1px) opacity(0.6);
-		}
-		50% {
-			filter: blur(2px) opacity(0.8);
-		}
-	}
-
-	@keyframes ominousShadows {
-		0%,
-		100% {
-			opacity: 0.3;
-			transform: rotate(0deg) scale(1) translateX(0%);
-		}
-		25% {
-			opacity: 0.5;
-			transform: rotate(90deg) scale(1.1) translateX(-5%);
-		}
-		50% {
-			opacity: 0.4;
-			transform: rotate(180deg) scale(0.9) translateX(5%);
-		}
-		75% {
-			opacity: 0.6;
-			transform: rotate(270deg) scale(1.05) translateX(-3%);
-		}
-	}
-
-	@keyframes shadowDrift {
-		0% {
-			transform: translate(0%, 0%) rotate(0deg);
-		}
-		100% {
-			transform: translate(-20%, 10%) rotate(360deg);
-		}
-	}
-
-	@keyframes bloodFall {
-		0% {
-			transform: translateY(-120vh) rotate(0deg) scale(0.8);
-			opacity: 0;
-		}
-		5% {
-			opacity: 0.9;
-			transform: translateY(-100vh) rotate(45deg) scale(1);
-		}
-		95% {
-			opacity: 0.7;
-			transform: translateY(100vh) rotate(315deg) scale(0.9);
-		}
-		100% {
-			transform: translateY(120vh) rotate(360deg) scale(0.6);
-			opacity: 0;
-		}
-	}
-
-	@keyframes debugShimmer {
-		0%,
-		100% {
-			opacity: 0.3;
-			background: linear-gradient(
-				45deg,
-				transparent 0%,
-				rgba(100, 116, 139, 0.03) 25%,
-				transparent 50%,
-				rgba(139, 0, 0, 0.02) 75%,
-				transparent 100%
-			);
-		}
-		50% {
-			opacity: 0.6;
-			background: linear-gradient(
-				45deg,
-				rgba(139, 0, 0, 0.02) 0%,
-				transparent 25%,
-				rgba(100, 116, 139, 0.04) 50%,
-				transparent 75%,
-				rgba(25, 25, 112, 0.02) 100%
-			);
-		}
-	}
-
-	/* Enhanced Village Panel to match the new theming */
+	/* Village Panel */
 	.village-panel {
 		background:
-			linear-gradient(
-				135deg,
-				rgba(30, 41, 59, 0.4) 0%,
-				rgba(15, 23, 42, 0.6) 30%,
-				rgba(51, 65, 85, 0.3) 70%,
-				rgba(30, 41, 59, 0.5) 100%
-			),
-			radial-gradient(circle at top left, rgba(139, 0, 0, 0.08) 0%, transparent 50%),
-			radial-gradient(circle at bottom right, rgba(25, 25, 112, 0.06) 0%, transparent 50%);
+			linear-gradient(135deg, rgba(30, 41, 59, 0.4) 0%, rgba(15, 23, 42, 0.6) 100%),
+			radial-gradient(circle at top left, rgba(139, 0, 0, 0.08) 0%, transparent 50%);
 		backdrop-filter: blur(16px);
 		border: 2px solid rgba(139, 0, 0, 0.25);
 		border-radius: 20px;
@@ -770,119 +624,18 @@
 		margin-bottom: 2rem;
 		position: relative;
 		overflow: hidden;
-		box-shadow:
-			0 16px 40px rgba(0, 0, 0, 0.4),
-			0 0 20px rgba(139, 0, 0, 0.1),
-			inset 0 1px 0 rgba(255, 255, 255, 0.08),
-			inset 0 -1px 0 rgba(0, 0, 0, 0.2);
+		box-shadow: 0 16px 40px rgba(0, 0, 0, 0.4);
 		transition: all 0.4s ease;
 	}
 
-	.village-panel:hover {
-		border-color: rgba(139, 0, 0, 0.4);
-		box-shadow:
-			0 20px 50px rgba(0, 0, 0, 0.5),
-			0 0 30px rgba(139, 0, 0, 0.2),
-			inset 0 1px 0 rgba(255, 255, 255, 0.12);
-		transform: translateY(-2px);
+	.village-panel h3 {
+		color: #d4d4d8;
+		font-family: 'Georgia', serif;
+		font-size: 1.5rem;
+		margin-bottom: 1.5rem;
 	}
 
-	/* Mobile Responsive Enhancements */
-	@media (max-width: 768px) {
-		.container {
-			padding: 1.5rem;
-			margin: 0.5rem;
-			border-radius: 16px;
-		}
-
-		.debug-info {
-			padding: 1rem;
-			font-size: 0.8rem;
-		}
-
-		.debug-info p {
-			flex-direction: column;
-			align-items: flex-start;
-			gap: 0.5rem;
-		}
-
-		.debug-info p strong {
-			min-width: auto;
-			font-size: 0.75rem;
-		}
-
-		.village-panel {
-			padding: 1.5rem;
-			border-radius: 16px;
-		}
-
-		/* Reduce particle effects on mobile for performance */
-		.blood-drop:nth-child(n + 4) {
-			display: none;
-		}
-
-		.game-container::before,
-		.game-container::after {
-			animation-duration: 60s, 100s, 40s; /* Slower animations */
-		}
-	}
-
-	@media (max-width: 480px) {
-		.container {
-			padding: 1rem;
-			margin: 0.25rem;
-		}
-
-		.debug-info {
-			padding: 0.75rem;
-			font-size: 0.75rem;
-		}
-
-		.village-panel {
-			padding: 1rem;
-		}
-
-		/* Minimal particles on very small screens */
-		.blood-drop:nth-child(n + 3) {
-			display: none;
-		}
-	}
-
-	/* High contrast mode support */
-	@media (prefers-contrast: high) {
-		.debug-info {
-			border-width: 3px;
-			border-color: rgba(139, 0, 0, 0.8);
-			background: rgba(15, 23, 42, 0.98);
-		}
-
-		.debug-info p strong {
-			background: rgba(139, 0, 0, 0.4);
-			border-color: rgba(139, 0, 0, 0.8);
-		}
-	}
-
-	/* Reduced motion support */
-	@media (prefers-reduced-motion: reduce) {
-		.game-container::before,
-		.game-container::after,
-		.blood-drop,
-		.debug-info::before {
-			animation-duration: 0.01ms !important;
-			animation-iteration-count: 1 !important;
-		}
-
-		.debug-info,
-		.village-panel {
-			transition-duration: 0.01ms !important;
-		}
-	}
-
-	/* Join Game Section */
-	.join-game-section {
-		margin-bottom: 2rem;
-	}
-
+	/* Join Form */
 	.join-form {
 		display: flex;
 		flex-direction: column;
@@ -891,19 +644,11 @@
 		margin: 0 auto;
 	}
 
-	.form-group {
-		margin-bottom: 1.5rem;
-	}
-
 	.form-group label {
 		display: block;
 		margin-bottom: 0.5rem;
 		color: #d4d4d8;
-		font-family: 'Georgia', serif;
 		font-weight: 600;
-		background: none;
-		-webkit-background-clip: unset;
-		-webkit-text-fill-color: unset;
 	}
 
 	.dark-input {
@@ -916,8 +661,6 @@
 		transition: all 0.3s ease;
 		width: 100%;
 		font-size: 1rem;
-		animation: none;
-		box-shadow: none;
 	}
 
 	.dark-input:focus {
@@ -927,16 +670,186 @@
 		background: linear-gradient(135deg, rgba(139, 0, 0, 0.1), rgba(20, 20, 40, 0.9));
 	}
 
-	.dark-input::placeholder {
-		color: #8b8680;
+	.cult-button {
+		background: linear-gradient(135deg, rgba(139, 0, 0, 0.2), rgba(25, 25, 112, 0.15));
+		border: 2px solid rgba(139, 0, 0, 0.4);
+		color: #d4d4d8;
+		padding: 1.2rem 2.5rem;
+		border-radius: 15px;
+		cursor: pointer;
+		transition: all 0.4s ease;
+		font-weight: 600;
+		font-family: 'Georgia', serif;
+		position: relative;
+		overflow: hidden;
 	}
 
-	.dark-input:disabled {
+	.cult-button:hover {
+		background: linear-gradient(135deg, rgba(139, 0, 0, 0.4), rgba(25, 25, 112, 0.3));
+		border-color: #8b0000;
+		box-shadow: 0 8px 25px rgba(139, 0, 0, 0.4);
+		transform: translateY(-3px);
+		color: #ffffff;
+	}
+
+	.cult-button:disabled {
 		opacity: 0.6;
 		cursor: not-allowed;
+		transform: none;
 	}
 
-	/* Lobby Status Section */
+	.cult-button.loading::after {
+		content: '';
+		position: absolute;
+		right: 1rem;
+		top: 50%;
+		transform: translateY(-50%);
+		width: 16px;
+		height: 16px;
+		border: 2px solid transparent;
+		border-top: 2px solid currentColor;
+		border-radius: 50%;
+		animation: spin 1s linear infinite;
+	}
+
+	/* Messages */
+	.join-message {
+		margin-top: 1rem;
+		padding: 1rem;
+		border-radius: 10px;
+		text-align: center;
+		font-weight: 600;
+		animation: fadeIn 0.3s ease-out;
+	}
+
+	.join-message.success {
+		background: linear-gradient(135deg, rgba(5, 150, 105, 0.2), rgba(0, 0, 0, 0.6));
+		border: 2px solid rgba(5, 150, 105, 0.4);
+		color: #10b981;
+	}
+
+	.join-message.error {
+		background: linear-gradient(135deg, rgba(239, 68, 68, 0.2), rgba(0, 0, 0, 0.6));
+		border: 2px solid rgba(239, 68, 68, 0.4);
+		color: #ef4444;
+	}
+
+	.join-message.info {
+		background: linear-gradient(135deg, rgba(59, 130, 246, 0.2), rgba(0, 0, 0, 0.6));
+		border: 2px solid rgba(59, 130, 246, 0.4);
+		color: #60a5fa;
+	}
+
+	/* Welcome Section */
+	.welcome-section {
+		text-align: center;
+	}
+
+	.welcome-text {
+		color: #8b8680;
+		margin-bottom: 1.5rem;
+		font-size: 1.1rem;
+	}
+
+	/* Players Grid */
+	.lobby-header {
+		display: flex;
+		justify-content: space-between;
+		align-items: center;
+		margin-bottom: 1.5rem;
+	}
+
+	.player-counter {
+		color: #8b8680;
+		font-family: 'Georgia', serif;
+	}
+
+	.count {
+		color: #8b0000;
+		font-weight: bold;
+		font-size: 1.2rem;
+	}
+
+	.players-grid {
+		display: grid;
+		gap: 1rem;
+		margin-bottom: 2rem;
+	}
+
+	.player-card {
+		background: linear-gradient(135deg, rgba(0, 0, 0, 0.6), rgba(20, 20, 40, 0.8));
+		border: 1px solid rgba(139, 0, 0, 0.3);
+		border-radius: 15px;
+		padding: 1.5rem;
+		transition: all 0.4s ease;
+		display: flex;
+		align-items: center;
+		gap: 1rem;
+	}
+
+	.player-card.self {
+		border-color: rgba(59, 130, 246, 0.5);
+		background: linear-gradient(135deg, rgba(59, 130, 246, 0.1), rgba(20, 20, 40, 0.8));
+	}
+
+	.player-card:hover {
+		border-color: #8b0000;
+		box-shadow: 0 8px 20px rgba(139, 0, 0, 0.3);
+		transform: translateY(-2px);
+	}
+
+	.player-avatar {
+		width: 50px;
+		height: 50px;
+		background: linear-gradient(135deg, #8b0000, #191970);
+		border-radius: 50%;
+		display: flex;
+		align-items: center;
+		justify-content: center;
+		color: white;
+		font-weight: bold;
+		font-size: 1.2rem;
+	}
+
+	.player-info {
+		flex: 1;
+	}
+
+	.player-name {
+		margin: 0 0 0.5rem 0;
+		color: #d4d4d8;
+		font-size: 1.1rem;
+	}
+
+	.you-badge {
+		font-size: 0.8rem;
+		color: #60a5fa;
+		font-weight: normal;
+		margin-left: 0.5rem;
+	}
+
+	.join-time {
+		margin: 0;
+		color: #8b8680;
+		font-size: 0.9rem;
+	}
+
+	.player-role {
+		font-size: 0.8rem;
+		color: #8b8680;
+		margin: 0.25rem 0 0 0;
+		font-style: italic;
+	}
+
+	.status-dot {
+		width: 12px;
+		height: 12px;
+		border-radius: 50%;
+		background: #32cd32;
+		box-shadow: 0 0 8px rgba(50, 205, 50, 0.5);
+	}
+
+	/* Lobby Status */
 	.lobby-status {
 		margin-top: 2rem;
 		display: flex;
@@ -946,7 +859,8 @@
 	}
 
 	.waiting-message,
-	.starting-message {
+	.starting-message,
+	.finished-message {
 		display: flex;
 		align-items: center;
 		gap: 1rem;
@@ -970,6 +884,12 @@
 		animation: deathPulse 3s ease-in-out infinite;
 	}
 
+	.finished-message {
+		background: linear-gradient(135deg, rgba(75, 75, 75, 0.2), rgba(0, 0, 0, 0.6));
+		border: 2px solid rgba(75, 75, 75, 0.4);
+		color: #9ca3af;
+	}
+
 	.status-indicator {
 		width: 16px;
 		height: 16px;
@@ -987,203 +907,49 @@
 		animation: bloodPulse 1.5s ease-in-out infinite;
 	}
 
-	.waiting-message h4,
-	.starting-message h4 {
-		margin: 0 0 0.5rem 0;
-		font-family: 'Georgia', serif;
-		font-size: 1.2rem;
-		font-weight: 600;
+	.status-indicator.finished {
+		background: #4b4b4b;
 	}
 
-	.waiting-message p,
-	.starting-message p {
-		margin: 0;
-		opacity: 0.9;
-		font-style: italic;
+	/* Activity Panel */
+	.activity-panel {
+		max-height: 200px;
+		overflow-y: auto;
 	}
 
-	.admin-link-btn {
-		background: linear-gradient(135deg, rgba(139, 0, 0, 0.1), rgba(25, 25, 112, 0.1));
-		border: 1px solid rgba(139, 0, 0, 0.3);
-		color: #8b8680;
-		padding: 0.8rem 1.5rem;
-		border-radius: 10px;
-		cursor: pointer;
-		transition: all 0.3s ease;
-		font-family: 'Georgia', serif;
+	.activity-list {
+		display: flex;
+		flex-direction: column;
+		gap: 0.5rem;
+	}
+
+	.activity-item {
+		display: flex;
+		gap: 1rem;
+		padding: 0.5rem;
+		background: rgba(0, 0, 0, 0.3);
+		border-radius: 8px;
 		font-size: 0.9rem;
-		text-decoration: none;
-		display: inline-block;
-		margin-top: 1rem;
 	}
 
-	.admin-link-btn:hover {
-		background: linear-gradient(135deg, rgba(139, 0, 0, 0.2), rgba(25, 25, 112, 0.2));
-		border-color: #8b0000;
-		color: #d4d4d8;
-		transform: translateY(-1px);
-	}
-
-	.player-role {
-		font-size: 0.8rem;
+	.activity-time {
 		color: #8b8680;
-		margin: 0.25rem 0 0 0;
-		font-style: italic;
+		flex-shrink: 0;
 	}
 
-	/* Message Display */
-	.join-message {
+	.activity-content {
+		color: #d4d4d8;
+	}
+
+	/* Admin Controls */
+	.admin-controls {
 		margin-top: 1rem;
-		padding: 1rem;
-		border-radius: 10px;
-		text-align: center;
-		font-weight: 600;
-		font-family: 'Georgia', serif;
 	}
 
-	.join-message.success {
-		background: linear-gradient(135deg, rgba(5, 150, 105, 0.2), rgba(0, 0, 0, 0.6));
-		border: 2px solid rgba(5, 150, 105, 0.4);
-		color: #10b981;
-	}
-
-	.join-message.error {
-		background: linear-gradient(135deg, rgba(239, 68, 68, 0.2), rgba(0, 0, 0, 0.6));
-		border: 2px solid rgba(239, 68, 68, 0.4);
-		color: #ef4444;
-	}
-
-	.join-message.info {
-		background: linear-gradient(135deg, rgba(59, 130, 246, 0.2), rgba(0, 0, 0, 0.6));
-		border: 2px solid rgba(59, 130, 246, 0.4);
-		color: #60a5fa;
-	}
-
-	/* Enhanced animations */
-	@keyframes statusPulse {
-		0%,
-		100% {
-			opacity: 1;
-			transform: scale(1);
-		}
-		50% {
-			opacity: 0.6;
-			transform: scale(1.1);
-		}
-	}
-
-	@keyframes bloodPulse {
-		0%,
-		100% {
-			opacity: 1;
-			transform: scale(1);
-			background: #8b0000;
-		}
-		50% {
-			opacity: 0.8;
-			transform: scale(1.2);
-			background: #ff0000;
-		}
-	}
-
-	/* Loading state for join button */
-	.cult-button.loading {
-		pointer-events: none;
-		opacity: 0.7;
-		position: relative;
-	}
-
-	.cult-button.loading::after {
-		content: '';
-		position: absolute;
-		right: 1rem;
-		top: 50%;
-		transform: translateY(-50%);
-		width: 16px;
-		height: 16px;
-		border: 2px solid transparent;
-		border-top: 2px solid currentColor;
-		border-radius: 50%;
-		animation: spin 1s linear infinite;
-	}
-
-	@keyframes spin {
-		0% {
-			transform: translateY(-50%) rotate(0deg);
-		}
-		100% {
-			transform: translateY(-50%) rotate(360deg);
-		}
-	}
-
-	/* Mobile responsive adjustments */
-	@media (max-width: 768px) {
-		.waiting-message,
-		.starting-message {
-			padding: 1rem;
-			flex-direction: column;
-			text-align: center;
-			gap: 0.75rem;
-		}
-
-		.status-indicator {
-			width: 20px;
-			height: 20px;
-		}
-
-		.lobby-status {
-			margin-top: 1.5rem;
-		}
-
-		.admin-link-btn,
-		.clear-lobby-btn {
-			width: 100%;
-			text-align: center;
-		}
-
-		.join-form {
-			max-width: 100%;
-		}
-
-		.cult-button {
-			width: 100%;
-		}
-	}
-
-	@media (max-width: 480px) {
-		.join-form {
-			gap: 0.75rem;
-		}
-
-		.form-group {
-			margin-bottom: 1rem;
-		}
-
-		.dark-input {
-			padding: 0.8rem;
-			font-size: 16px; /* Prevents zoom on iOS */
-		}
-
-		.cult-button {
-			padding: 1rem;
-			font-size: 0.9rem;
-		}
-
-		.waiting-message h4,
-		.starting-message h4 {
-			font-size: 1.1rem;
-		}
-
-		.waiting-message p,
-		.starting-message p {
-			font-size: 0.9rem;
-		}
-
-		.admin-link-btn,
-		.clear-lobby-btn {
-			padding: 0.7rem 1.2rem;
-			font-size: 0.85rem;
-		}
+	.admin-link-btn,
+	.clear-lobby-btn {
+		padding: 0.7rem 1.2rem;
+		font-size: 0.85rem;
 	}
 
 	/* Dark Village Interface Elements */

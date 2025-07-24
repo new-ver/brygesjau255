@@ -2,354 +2,120 @@
 	import { onMount, onDestroy } from 'svelte';
 	import { goto } from '$app/navigation';
 	import { supabase } from '$lib/supabase';
-	import type { RealtimeChannel } from '@supabase/supabase-js';
-	// Optimized subscription flow to prevent infinite loops
+	import {
+		gameStore,
+		players,
+		gameState,
+		connectionStatus,
+		playersByAffiliation,
+		alivePlayers
+	} from '$lib/stores/gameState';
 
-	interface GamePlayer {
-		id: string;
-		name: string;
-		affiliation: 'cult' | 'townsfolk' | null;
-		character: string | null;
-		joined_at: string;
-		is_alive: boolean;
-	}
-
-	interface GameState {
-		id: number;
-		status: 'lobby' | 'night' | 'day' | 'voting' | 'finished';
-		current_phase: string;
-		day_number: number;
-		created_at: string;
-		updated_at: string;
-	}
-
-	// State management with change detection
-	let players: GamePlayer[] = [];
-	let gameState: GameState | null = null;
+	// Local state for UI
 	let adminMessage = '';
 	let isProcessing = false;
-	let subscription: RealtimeChannel | null = null;
 
-	// Add loading states to prevent redundant calls
-	let isLoadingPlayers = false;
-	let isLoadingGameState = false;
+	// Subscribe to store values
+	$: allPlayers = $players;
+	$: currentGameState = $gameState;
+	$: connection = $connectionStatus;
+	$: ({ cult, townsfolk } = $playersByAffiliation);
+	$: aliveCount = $alivePlayers.length;
 
-	// Track last known state to detect actual changes
-	let lastKnownGameStatus: string | null = null;
-	let lastKnownPlayerCount = 0;
-
-	// Debounce mechanism to prevent rapid-fire updates
-	let loadDataTimeout: NodeJS.Timeout | null = null;
-	const DEBOUNCE_MS = 100;
-
-	// Separate loading functions with loading guards
-	async function loadPlayers() {
-		if (isLoadingPlayers) {
-			console.log('⏸️ Players already loading, skipping...');
-			return;
-		}
-
-		isLoadingPlayers = true;
-		try {
-			console.log('👥 Loading players...');
-
-			const { data: playersData, error: playersError } = await supabase
-				.from('game_players')
-				.select('*')
-				.order('joined_at', { ascending: true });
-
-			if (playersError) throw new Error(`Players error: ${playersError.message}`);
-
-			const oldPlayerCount = players.length;
-			players = playersData ?? [];
-
-			// Only log if there's an actual change
-			if (players.length !== lastKnownPlayerCount) {
-				console.log(`👥 Players updated: ${lastKnownPlayerCount} → ${players.length}`);
-				lastKnownPlayerCount = players.length;
-			}
-		} catch (error: unknown) {
-			console.error('💥 Error loading players:', error);
-			adminMessage = `Error loading players: ${error ?? 'Unknown error'}`;
-		} finally {
-			isLoadingPlayers = false;
-		}
-	}
-
-	async function loadGameState() {
-		if (isLoadingGameState) {
-			console.log('⏸️ Game state already loading, skipping...');
-			return;
-		}
-
-		isLoadingGameState = true;
-		try {
-			console.log('🎮 Loading game state...');
-
-			const { data: stateData, error: stateError } = await supabase
-				.from('game_state')
-				.select('*')
-				.single();
-
-			if (stateError) {
-				if (
-					stateError.code !== 'PGRST116' &&
-					!stateError.message.includes('Results contain 0 rows')
-				) {
-					throw new Error(`Game state error: ${stateError.message}`);
-				}
-				console.log('📝 No game state found - game not started yet');
-				gameState = null;
-				lastKnownGameStatus = null;
-			} else {
-				const oldStatus = gameState?.status;
-				gameState = stateData;
-
-				// Only log and trigger transitions if there's an actual change
-				if (gameState && gameState.status !== lastKnownGameStatus) {
-					console.log(
-						`🎮 Game status changed: ${lastKnownGameStatus || 'null'} → ${gameState.status}`
-					);
-					console.log(`📋 New phase: ${gameState.current_phase}`);
-					lastKnownGameStatus = gameState.status;
-
-					// Only trigger game transition logic here, not in every load
-					checkForGameTransition();
-				}
-			}
-		} catch (error: unknown) {
-			console.error('💥 Error loading game state:', error);
-			adminMessage = `Error loading game state: ${error ?? 'Unknown error'}`;
-		} finally {
-			isLoadingGameState = false;
-		}
-	}
-
-	// Debounced combined loader
-	function debouncedLoadGameData() {
-		if (loadDataTimeout) {
-			clearTimeout(loadDataTimeout);
-		}
-
-		loadDataTimeout = setTimeout(async () => {
-			console.log('📊 Loading game data (debounced)...');
-			await Promise.all([loadPlayers(), loadGameState()]);
-		}, DEBOUNCE_MS);
-	}
-
-	// Direct loader for initial load and manual refreshes
-	async function loadGameData() {
-		console.log('📊 Loading game data (immediate)...');
-		await Promise.all([loadPlayers(), loadGameState()]);
-	}
-
-	// Game transition logic separated from data loading
-	function checkForGameTransition() {
-		if (!gameState) return;
-
-		console.log(`🔄 Checking transition for status: ${gameState.status}`);
-
-		// Add your game transition logic here
-		if (gameState.status === 'night') {
-			// Handle night phase transition
-			console.log('🌙 Transitioning to night phase');
-			// Don't call loadGameData() here to avoid loops
-		} else if (gameState.status === 'day') {
-			// Handle day phase transition
-			console.log('☀️ Transitioning to day phase');
-			// Don't call loadGameData() here to avoid loops
-		}
-		// ... other transitions
-	}
-
-	// Optimized admin functions with better state management
+	// Admin functions with better state management
 	async function startGame() {
-		if (players.length < 3) {
+		if (allPlayers.length < 3) {
 			adminMessage = 'Need at least 3 players to start the game';
 			return;
 		}
 
-		if (isProcessing) {
-			console.log('⏸️ Already processing, ignoring start game request');
-			return;
-		}
+		if (isProcessing) return;
 
 		isProcessing = true;
 		adminMessage = 'Initializing game and assigning roles...';
 
 		try {
-			console.log('🎮 Starting game with', players.length, 'players');
+			const { error } = await supabase.rpc('start_game_simple');
 
-			const { error: startError } = await supabase.rpc('start_game_simple');
+			if (error) throw error;
 
-			if (startError) {
-				console.error('❌ Start game RPC error:', startError);
-				throw startError;
-			}
+			adminMessage = '✅ Game started! Roles assigned.';
 
-			console.log('✅ start_game_simple() completed successfully');
-			adminMessage = 'Roles assigned! The game state will update automatically.';
-
-			// Don't manually reload here - let the subscription handle it
-			// The subscription will detect the change and call debouncedLoadGameData()
-		} catch (error: unknown) {
-			console.error('💥 Error starting game:', error);
+			// The store will automatically update via subscriptions
+		} catch (error) {
+			console.error('Error starting game:', error);
 			adminMessage = `❌ Error starting game: ${error || 'Unknown error'}`;
 		} finally {
 			isProcessing = false;
+			// Clear message after 3 seconds
+			setTimeout(() => (adminMessage = ''), 3000);
 		}
 	}
 
 	async function resetGame() {
-		const playerCount = players.length;
-		const gameStatus = gameState?.status || 'unknown';
-
-		const confirmMessage = `⚠️ RESET ENTIRE GAME ⚠️\n\nThis will:\n• Remove all ${playerCount} players\n• Reset status from "${gameStatus}" to "lobby"\n• Clear all roles\n\nContinue?`;
+		const confirmMessage = `⚠️ RESET ENTIRE GAME ⚠️\n\nThis will:\n• Remove all ${allPlayers.length} players\n• Reset status from "${currentGameState?.status || 'unknown'}" to "lobby"\n• Clear all roles\n\nContinue?`;
 
 		if (!confirm(confirmMessage)) return;
-
-		if (isProcessing) {
-			console.log('⏸️ Already processing, ignoring reset request');
-			return;
-		}
+		if (isProcessing) return;
 
 		isProcessing = true;
 		adminMessage = 'Resetting entire game...';
 
 		try {
-			console.log('🔄 Starting game reset...');
+			const { error } = await supabase.rpc('reset_game_simple');
 
-			const { error: resetError } = await supabase.rpc('reset_game_simple');
+			if (error) throw error;
 
-			if (resetError) {
-				console.error('❌ Reset game RPC error:', resetError);
-				throw resetError;
-			}
-
-			console.log('✅ reset_game_simple() completed successfully');
-			adminMessage = 'Game reset completed! State will update automatically.';
-
-			// Reset our tracking variables
-			lastKnownGameStatus = null;
-			lastKnownPlayerCount = 0;
-
-			// Don't manually reload - let subscription handle it
-		} catch (error: unknown) {
-			console.error('💥 Error resetting game:', error);
+			adminMessage = '✅ Game reset completed!';
+		} catch (error) {
+			console.error('Error resetting game:', error);
 			adminMessage = `❌ Error resetting game: ${error || 'Unknown error'}`;
 		} finally {
 			isProcessing = false;
+			setTimeout(() => (adminMessage = ''), 3000);
 		}
 	}
 
-	// Optimized subscription setup
-	onMount(() => {
-		// Initial load
-		loadGameData();
-
-		// Set up real-time subscription with specific event handling
-		subscription = supabase
-			.channel('admin_channel')
-			.on(
-				'postgres_changes',
-				{ event: '*', schema: 'public', table: 'game_players' },
-				(payload) => {
-					console.log('👥 Player change detected:', payload.eventType);
-					// Use debounced loader to prevent rapid updates
-					debouncedLoadGameData();
-				}
-			)
-			.on('postgres_changes', { event: '*', schema: 'public', table: 'game_state' }, (payload) => {
-				console.log('🎮 Game state change detected:', payload.eventType, payload.new);
-				// Use debounced loader for game state changes too
-				debouncedLoadGameData();
-			})
-			.subscribe((status) => {
-				console.log('📡 Subscription status:', status);
-			});
-	});
-
-	onDestroy(() => {
-		// Clean up
-		if (loadDataTimeout) {
-			clearTimeout(loadDataTimeout);
-		}
-
-		if (subscription) {
-			console.log('🧹 Cleaning up subscription');
-			supabase.removeChannel(subscription);
-		}
-	});
-
-	// Alternative: Reset only players (keep game state)
 	async function resetPlayersOnly() {
-		const playerCount = players.length;
-
-		if (playerCount === 0) {
+		if (allPlayers.length === 0) {
 			adminMessage = 'No players to remove';
 			return;
 		}
 
-		const confirmMessage = `Remove all ${playerCount} players but keep game state?
+		const confirmMessage = `Remove all ${allPlayers.length} players but keep game state?\n\nThis will:\n• Remove all players from the game\n• Keep current game status: "${currentGameState?.status || 'unknown'}"\n• Keep current phase: "${currentGameState?.current_phase || 'unknown'}"\n\nContinue?`;
 
-This will:
-• Remove all players from the game
-• Keep current game status: "${gameState?.status || 'unknown'}"
-• Keep current phase: "${gameState?.current_phase || 'unknown'}"
-
-Continue?`;
-
-		if (!confirm(confirmMessage)) {
-			return;
-		}
+		if (!confirm(confirmMessage)) return;
 
 		isProcessing = true;
 		adminMessage = 'Removing all players...';
 
 		try {
-			console.log('👥 Removing all players...');
-
 			const { error } = await supabase
 				.from('game_players')
 				.delete()
-				.neq('id', '00000000-0000-0000-0000-000000000000'); // Delete all
+				.neq('id', '00000000-0000-0000-0000-000000000000');
 
-			if (error) {
-				console.error('❌ Delete players error:', error);
-				throw error;
-			}
+			if (error) throw error;
 
-			console.log('✅ All players removed successfully');
-			adminMessage = 'Players removed! Reloading data...';
-
-			// Reload data
-			await loadGameData();
-
-			adminMessage = `✅ All players removed successfully! 
-      Removed ${playerCount} players. 
-      Game state unchanged: ${gameState?.status || 'lobby'}`;
-		} catch (error: unknown) {
-			console.error('💥 Error removing players:', error);
+			adminMessage = `✅ All ${allPlayers.length} players removed!`;
+		} catch (error) {
+			console.error('Error removing players:', error);
 			adminMessage = `❌ Error removing players: ${error || 'Unknown error'}`;
 		} finally {
 			isProcessing = false;
+			setTimeout(() => (adminMessage = ''), 3000);
 		}
 	}
 
-	// Force game state change (for debugging)
 	async function forceGameState(newStatus: 'lobby' | 'night' | 'day' | 'voting' | 'finished') {
-		if (!confirm(`Force change game status to "${newStatus}"?`)) {
-			return;
-		}
+		if (!confirm(`Force change game status to "${newStatus}"?`)) return;
 
 		isProcessing = true;
 		adminMessage = `Forcing game state to ${newStatus}...`;
 
 		try {
-			console.log(`🔧 Forcing game state to: ${newStatus}`);
-
 			let newPhase: string;
-			let newDay: number = gameState?.day_number || 1;
+			let newDay = currentGameState?.day_number || 1;
 
 			switch (newStatus) {
 				case 'lobby':
@@ -382,29 +148,24 @@ Continue?`;
 
 			if (error) throw error;
 
-			await loadGameData();
-			adminMessage = `✅ Game state forced to: ${newStatus} | ${newPhase}`;
-		} catch (error: unknown) {
-			console.error('💥 Error forcing game state:', error);
+			adminMessage = `✅ Game state forced to: ${newStatus}`;
+		} catch (error) {
+			console.error('Error forcing game state:', error);
 			adminMessage = `❌ Error: ${error || 'Unknown error'}`;
 		} finally {
 			isProcessing = false;
+			setTimeout(() => (adminMessage = ''), 3000);
 		}
 	}
 
 	async function removePlayer(playerId: string, playerName: string) {
-		if (!confirm(`Remove ${playerName} from the game?`)) {
-			return;
-		}
+		if (!confirm(`Remove ${playerName} from the game?`)) return;
 
 		try {
-			const { error } = await supabase.from('game_players').delete().eq('id', playerId);
-
-			if (error) throw error;
-
+			await gameStore.removePlayer(playerId);
 			adminMessage = `${playerName} removed from game`;
-			await loadGameData();
-		} catch (error: unknown) {
+			setTimeout(() => (adminMessage = ''), 3000);
+		} catch (error) {
 			console.error('Error removing player:', error);
 			adminMessage = `Error removing player: ${error}`;
 		}
@@ -412,77 +173,85 @@ Continue?`;
 
 	async function togglePlayerLife(playerId: string, playerName: string, isAlive: boolean) {
 		try {
-			const { error } = await supabase
-				.from('game_players')
-				.update({ is_alive: !isAlive })
-				.eq('id', playerId);
-
-			if (error) throw error;
-
+			await gameStore.updatePlayer(playerId, { is_alive: !isAlive });
 			adminMessage = `${playerName} is now ${!isAlive ? 'alive' : 'dead'}`;
-			await loadGameData();
-		} catch (error: unknown) {
+			setTimeout(() => (adminMessage = ''), 3000);
+		} catch (error) {
 			console.error('Error toggling player life:', error);
 			adminMessage = `Error: ${error}`;
 		}
 	}
 
-	function getGameStatusColor(status: string) {
-		switch (status) {
-			case 'lobby':
-				return '#6b7280';
-			case 'night':
-				return '#4338ca';
-			case 'day':
-				return '#f59e0b';
-			case 'voting':
-				return '#dc2626';
-			case 'finished':
-				return '#059669';
-			default:
-				return '#6b7280';
-		}
+	// Helper functions for styling
+	function getGameStatusColor(status: 'lobby' | 'night' | 'day' | 'voting' | 'finished') {
+		const colors = {
+			lobby: '#6b7280',
+			night: '#4338ca',
+			day: '#f59e0b',
+			voting: '#dc2626',
+			finished: '#059669'
+		};
+		return colors[status] || '#6b7280';
 	}
 
-	function getRoleColor(affiliation: string | null) {
-		switch (affiliation) {
-			case 'cult':
-				return '#dc2626';
-			case 'townsfolk':
-				return '#059669';
-			default:
-				return '#6b7280';
-		}
+	function getRoleColor(affiliation: 'cult' | 'townsfolk') {
+		const colors = {
+			cult: '#dc2626',
+			townsfolk: '#059669'
+		};
+		return colors[affiliation] || '#6b7280';
 	}
 
-	// onMount(() => {
-	// 	loadGameData();
+	// Initialize store on mount
+	onMount(() => {
+		const initializeAndListen = async () => {
+			await gameStore.initialize();
+		};
 
-	// 	// Set up real-time subscription
-	// 	subscription = supabase
-	// 		.channel('admin_channel')
-	// 		.on('postgres_changes', { event: '*', schema: 'public', table: 'game_players' }, () =>
-	// 			loadGameData()
-	// 		)
-	// 		.on('postgres_changes', { event: '*', schema: 'public', table: 'game_state' }, () =>
-	// 			loadGameData()
-	// 		)
-	// 		.subscribe();
-	// });
+		initializeAndListen();
 
-	// onDestroy(() => {
-	// 	if (subscription) {
-	// 		supabase.removeChannel(subscription);
-	// 	}
-	// });
+		// Listen for phase changes
+		const handlePhaseChange = (event: Event) => {
+			const customEvent = event as CustomEvent;
+			console.log('Game phase changed:', customEvent.detail);
+			adminMessage = `📢 Phase changed to: ${customEvent.detail.newPhase}`;
+			setTimeout(() => (adminMessage = ''), 3000);
+		};
+
+		window.addEventListener('gamePhaseChange' as keyof WindowEventMap, handlePhaseChange);
+
+		return () => {
+			window.removeEventListener('gamePhaseChange' as keyof WindowEventMap, handlePhaseChange);
+		};
+	});
+
+	// Cleanup on destroy
+	onDestroy(() => {
+		gameStore.cleanup();
+	});
 </script>
 
 <svelte:head>
 	<title>Storyteller Control - Village of Shadows</title>
 </svelte:head>
 
+<!-- Connection Status Indicator -->
+{#if connection !== 'connected'}
+	<div class="connection-status" class:error={connection === 'error'}>
+		{#if connection === 'connecting'}
+			🔄 Connecting to game server...
+		{:else if connection === 'error'}
+			❌ Connection error - please refresh
+		{:else}
+			⚠️ Disconnected from server
+		{/if}
+	</div>
+{/if}
+
 {#if adminMessage}
-	<p class="admin-message">{adminMessage}</p>
+	<div class="admin-message" class:error={adminMessage.includes('❌')}>
+		{adminMessage}
+	</div>
 {/if}
 
 <!-- Clean Admin Container -->
@@ -502,27 +271,27 @@ Continue?`;
 			</nav>
 		</header>
 
-		<!-- Enhanced Game Controls Section for Admin Panel -->
+		<!-- Game Controls Section -->
 		<section class="admin-panel">
 			<h2 class="panel-title">🎛️ Game Controls</h2>
 
 			<div class="control-section">
-				{#if !gameState || gameState.status === 'lobby'}
+				{#if !currentGameState || currentGameState.status === 'lobby'}
 					<!-- Start Game Button -->
 					<button
 						class="control-btn primary large"
 						on:click={startGame}
-						disabled={isProcessing || players.length < 3}
+						disabled={isProcessing || allPlayers.length < 3}
 					>
 						{#if isProcessing}
 							<span class="btn-icon">⏳</span>
 							Starting Game...
-						{:else if players.length < 3}
+						{:else if allPlayers.length < 3}
 							<span class="btn-icon">👥</span>
-							Need {3 - players.length} More Players
+							Need {3 - allPlayers.length} More Players
 						{:else}
 							<span class="btn-icon">🌙</span>
-							Start Game ({players.length} players)
+							Start Game ({allPlayers.length} players)
 						{/if}
 					</button>
 				{:else}
@@ -530,17 +299,17 @@ Continue?`;
 					<div class="game-status-active">
 						<div
 							class="status-indicator"
-							style="background-color: {getGameStatusColor(gameState.status)}"
+							style="background-color: {getGameStatusColor(currentGameState.status)}"
 						></div>
 						<div>
 							<h3>Game Running</h3>
-							<p>Status: <strong>{gameState.status.toUpperCase()}</strong></p>
-							<p>Phase: <strong>{gameState.current_phase}</strong></p>
-							<p>Day: <strong>{gameState.day_number}</strong></p>
+							<p>Status: <strong>{currentGameState.status.toUpperCase()}</strong></p>
+							<p>Phase: <strong>{currentGameState.current_phase}</strong></p>
+							<p>Day: <strong>{currentGameState.day_number}</strong></p>
 						</div>
 					</div>
 
-					<!-- Phase Control Buttons (if game is running) -->
+					<!-- Phase Control Buttons -->
 					<div class="phase-controls">
 						<button
 							class="control-btn secondary"
@@ -573,9 +342,7 @@ Continue?`;
 
 				<!-- Reset Controls -->
 				<div class="reset-controls">
-					<h4 style="color: #f8fafc; margin: 1.5rem 0 1rem 0; font-size: 1.1rem;">
-						⚠️ Reset Options
-					</h4>
+					<h4>⚠️ Reset Options</h4>
 
 					<div class="reset-buttons">
 						<button class="control-btn danger" on:click={resetGame} disabled={isProcessing}>
@@ -586,7 +353,7 @@ Continue?`;
 						<button
 							class="control-btn warning"
 							on:click={resetPlayersOnly}
-							disabled={isProcessing || players.length === 0}
+							disabled={isProcessing || allPlayers.length === 0}
 						>
 							<span class="btn-icon">👥</span>
 							Clear Players Only
@@ -605,12 +372,14 @@ Continue?`;
 
 				<!-- Debug Controls -->
 				<div class="debug-controls">
-					<h4 style="color: #f8fafc; margin: 1.5rem 0 1rem 0; font-size: 1.1rem;">
-						🔧 Debug Tools
-					</h4>
+					<h4>🔧 Debug Tools</h4>
 
 					<div class="debug-buttons">
-						<button class="control-btn debug" on:click={loadGameData} disabled={isProcessing}>
+						<button
+							class="control-btn debug"
+							on:click={() => gameStore.refresh()}
+							disabled={isProcessing}
+						>
 							<span class="btn-icon">🔄</span>
 							Reload Data
 						</button>
@@ -628,20 +397,16 @@ Continue?`;
 		<section class="admin-panel">
 			<div class="panel-header">
 				<h2 class="panel-title">👥 Players Management</h2>
-				{#if players.length > 0}
+				{#if allPlayers.length > 0}
 					<div class="quick-stats">
-						<span class="stat cult"
-							>Cult: {players.filter((p) => p.affiliation === 'cult').length}</span
-						>
-						<span class="stat townsfolk"
-							>Townsfolk: {players.filter((p) => p.affiliation === 'townsfolk').length}</span
-						>
-						<span class="stat alive">Alive: {players.filter((p) => p.is_alive).length}</span>
+						<span class="stat cult">Cult: {cult.length}</span>
+						<span class="stat townsfolk">Townsfolk: {townsfolk.length}</span>
+						<span class="stat alive">Alive: {aliveCount}</span>
 					</div>
 				{/if}
 			</div>
 
-			{#if players.length === 0}
+			{#if allPlayers.length === 0}
 				<div class="empty-state">
 					<div class="empty-icon">👥</div>
 					<h3>No players yet</h3>
@@ -649,7 +414,7 @@ Continue?`;
 				</div>
 			{:else}
 				<div class="players-grid">
-					{#each players as player (player.id)}
+					{#each allPlayers as player (player.id)}
 						<div class="player-card" class:dead={!player.is_alive}>
 							<div class="player-header">
 								<div class="player-avatar" class:dead={!player.is_alive}>
@@ -716,17 +481,120 @@ Continue?`;
 </div>
 
 <style>
-	/* ==========================================================================
-     CLEAN ADMIN PANEL - COMPONENT SCOPED STYLES
-     ========================================================================== */
+	/* Connection Status */
+	.connection-status {
+		position: fixed;
+		top: 0;
+		left: 0;
+		right: 0;
+		background: rgba(59, 130, 246, 0.9);
+		color: white;
+		padding: 0.5rem;
+		text-align: center;
+		font-weight: 500;
+		z-index: 1000;
+		animation: slideDown 0.3s ease-out;
+	}
 
-	/* Admin Container - Isolates from festival styles */
+	.connection-status.error {
+		background: rgba(239, 68, 68, 0.9);
+	}
+
+	/* Admin Message */
+	.admin-message {
+		position: fixed;
+		top: 50px;
+		left: 50%;
+		transform: translateX(-50%);
+		background: rgba(5, 150, 105, 0.95);
+		color: white;
+		padding: 1rem 2rem;
+		border-radius: 8px;
+		font-weight: 500;
+		box-shadow: 0 4px 20px rgba(0, 0, 0, 0.3);
+		z-index: 999;
+		animation: slideDown 0.3s ease-out;
+	}
+
+	.admin-message.error {
+		background: rgba(239, 68, 68, 0.95);
+	}
+
+	@keyframes slideDown {
+		from {
+			transform: translate(-50%, -100%);
+			opacity: 0;
+		}
+		to {
+			transform: translate(-50%, 0);
+			opacity: 1;
+		}
+	}
+
+	/* Reset Controls */
+	.reset-controls h4,
+	.debug-controls h4 {
+		color: #f8fafc;
+		margin: 1.5rem 0 1rem 0;
+		font-size: 1.1rem;
+	}
+
+	/* Phase Controls */
+	.phase-controls {
+		display: grid;
+		grid-template-columns: repeat(3, 1fr);
+		gap: 0.5rem;
+		margin-top: 1rem;
+	}
+
+	.reset-buttons,
+	.debug-buttons {
+		display: grid;
+		grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+		gap: 0.5rem;
+	}
+
+	/* Additional button styles */
+	.control-btn.secondary {
+		background: linear-gradient(135deg, #475569, #64748b);
+		color: white;
+	}
+
+	.control-btn.secondary:hover:not(:disabled) {
+		background: linear-gradient(135deg, #334155, #475569);
+	}
+
+	.control-btn.warning {
+		background: linear-gradient(135deg, #f59e0b, #fbbf24);
+		color: white;
+	}
+
+	.control-btn.warning:hover:not(:disabled) {
+		background: linear-gradient(135deg, #d97706, #f59e0b);
+	}
+
+	.control-btn.info {
+		background: linear-gradient(135deg, #3b82f6, #60a5fa);
+		color: white;
+	}
+
+	.control-btn.info:hover:not(:disabled) {
+		background: linear-gradient(135deg, #2563eb, #3b82f6);
+	}
+
+	.control-btn.debug {
+		background: linear-gradient(135deg, #8b5cf6, #a78bfa);
+		color: white;
+	}
+
+	.control-btn.debug:hover:not(:disabled) {
+		background: linear-gradient(135deg, #7c3aed, #8b5cf6);
+	}
+
+	/* Rest of the styles remain the same as in the original */
 	.admin-container {
-		/* Reset any inherited styles */
 		all: initial;
 		display: block;
-
-		/* Clean, professional admin theme */
 		background: linear-gradient(135deg, #0f172a 0%, #1e293b 50%, #334155 100%);
 		min-height: 100vh;
 		font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Inter', sans-serif;
@@ -735,7 +603,6 @@ Continue?`;
 		box-sizing: border-box;
 	}
 
-	/* Ensure all elements use border-box */
 	.admin-container *,
 	.admin-container *::before,
 	.admin-container *::after {
@@ -748,7 +615,6 @@ Continue?`;
 		padding: 2rem;
 	}
 
-	/* Header */
 	.admin-header {
 		display: flex;
 		justify-content: space-between;
@@ -804,7 +670,6 @@ Continue?`;
 		color: #cbd5e1;
 	}
 
-	/* Panels */
 	.admin-panel {
 		background: rgba(255, 255, 255, 0.05);
 		backdrop-filter: blur(20px);
@@ -829,76 +694,6 @@ Continue?`;
 		margin-bottom: 1.5rem;
 	}
 
-	/* Status Grid */
-	.status-grid {
-		display: grid;
-		grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
-		gap: 1rem;
-	}
-
-	.status-card {
-		background: rgba(255, 255, 255, 0.05);
-		border: 1px solid rgba(255, 255, 255, 0.1);
-		border-radius: 12px;
-		padding: 1.5rem;
-		text-align: center;
-	}
-
-	.status-label {
-		display: block;
-		font-size: 0.875rem;
-		font-weight: 600;
-		color: #94a3b8;
-		margin-bottom: 0.5rem;
-		text-transform: uppercase;
-		letter-spacing: 0.05em;
-	}
-
-	.status-badge {
-		display: inline-block;
-		padding: 0.375rem 0.75rem;
-		border-radius: 6px;
-		font-size: 0.875rem;
-		font-weight: 700;
-		color: white;
-		text-transform: uppercase;
-		letter-spacing: 0.05em;
-	}
-
-	.status-value {
-		font-size: 1.125rem;
-		font-weight: 600;
-		color: #f8fafc;
-	}
-
-	/* Alerts */
-	.alert {
-		display: flex;
-		align-items: center;
-		gap: 0.75rem;
-		padding: 1rem 1.25rem;
-		border-radius: 8px;
-		margin-top: 1rem;
-		font-weight: 500;
-	}
-
-	.alert.warning {
-		background: rgba(251, 191, 36, 0.1);
-		border: 1px solid rgba(251, 191, 36, 0.2);
-		color: #fbbf24;
-	}
-
-	.alert.info {
-		background: rgba(59, 130, 246, 0.1);
-		border: 1px solid rgba(59, 130, 246, 0.2);
-		color: #60a5fa;
-	}
-
-	.alert-icon {
-		font-size: 1.25rem;
-	}
-
-	/* Control Section */
 	.control-section {
 		display: flex;
 		flex-direction: column;
@@ -986,7 +781,6 @@ Continue?`;
 		opacity: 0.8;
 	}
 
-	/* Quick Stats */
 	.quick-stats {
 		display: flex;
 		gap: 1rem;
@@ -1017,7 +811,6 @@ Continue?`;
 		border: 1px solid rgba(59, 130, 246, 0.2);
 	}
 
-	/* Empty State */
 	.empty-state {
 		text-align: center;
 		padding: 3rem 2rem;
@@ -1051,7 +844,6 @@ Continue?`;
 		text-decoration: underline;
 	}
 
-	/* Players Grid */
 	.players-grid {
 		display: grid;
 		grid-template-columns: repeat(auto-fill, minmax(320px, 1fr));
@@ -1236,7 +1028,6 @@ Continue?`;
 		border-color: rgba(107, 114, 128, 0.5);
 	}
 
-	/* Animations */
 	@keyframes pulse {
 		0%,
 		100% {
@@ -1245,58 +1036,6 @@ Continue?`;
 		50% {
 			opacity: 0.5;
 		}
-	}
-
-	@keyframes spin {
-		0% {
-			transform: rotate(0deg);
-		}
-		100% {
-			transform: rotate(360deg);
-		}
-	}
-
-	/* Loading states */
-	.loading {
-		pointer-events: none;
-		opacity: 0.7;
-	}
-
-	.loading::after {
-		content: '';
-		display: inline-block;
-		width: 16px;
-		height: 16px;
-		border: 2px solid transparent;
-		border-top: 2px solid currentColor;
-		border-radius: 50%;
-		animation: spin 1s linear infinite;
-		margin-left: 0.5rem;
-	}
-
-	/* Focus states for accessibility */
-	.nav-btn:focus,
-	.control-btn:focus,
-	.action-btn:focus {
-		outline: 2px solid #60a5fa;
-		outline-offset: 2px;
-	}
-
-	/* Smooth transitions for state changes */
-	.player-card,
-	.status-card,
-	.admin-panel {
-		transition: all 0.2s cubic-bezier(0.4, 0, 0.2, 1);
-	}
-
-	/* Enhanced hover effects */
-	.admin-panel:hover {
-		box-shadow: 0 12px 40px rgba(0, 0, 0, 0.3);
-	}
-
-	.status-card:hover {
-		background: rgba(255, 255, 255, 0.08);
-		transform: translateY(-1px);
 	}
 
 	/* Responsive Design */
@@ -1320,10 +1059,6 @@ Continue?`;
 			text-align: center;
 		}
 
-		.status-grid {
-			grid-template-columns: 1fr;
-		}
-
 		.players-grid {
 			grid-template-columns: 1fr;
 		}
@@ -1337,6 +1072,10 @@ Continue?`;
 			flex-direction: column;
 			gap: 1rem;
 			align-items: stretch;
+		}
+
+		.phase-controls {
+			grid-template-columns: 1fr;
 		}
 
 		.control-btn.large {
@@ -1411,165 +1150,5 @@ Continue?`;
 		.character-name {
 			font-size: 0.875rem;
 		}
-	}
-
-	/* Print styles */
-	@media print {
-		.admin-container {
-			background: white;
-			color: black;
-		}
-
-		.nav-btn,
-		.control-btn,
-		.action-btn {
-			display: none;
-		}
-
-		.admin-panel {
-			break-inside: avoid;
-			border: 1px solid #ddd;
-			box-shadow: none;
-		}
-	}
-
-	/* High contrast mode support */
-	@media (prefers-contrast: high) {
-		.admin-panel {
-			border-width: 2px;
-		}
-
-		.status-badge,
-		.role-badge {
-			font-weight: 900;
-		}
-
-		.action-btn,
-		.control-btn,
-		.nav-btn {
-			border-width: 2px;
-		}
-	}
-
-	/* Reduced motion support */
-	@media (prefers-reduced-motion: reduce) {
-		* {
-			animation-duration: 0.01ms !important;
-			animation-iteration-count: 1 !important;
-			transition-duration: 0.01ms !important;
-		}
-	}
-
-	/* Dark mode enhancements (already built-in, but adding explicit support) */
-	@media (prefers-color-scheme: dark) {
-		.admin-container {
-			color-scheme: dark;
-		}
-	}
-
-	/* Additional utility classes */
-	.text-center {
-		text-align: center;
-	}
-
-	.mt-1 {
-		margin-top: 0.25rem;
-	}
-
-	.mt-2 {
-		margin-top: 0.5rem;
-	}
-
-	.mt-4 {
-		margin-top: 1rem;
-	}
-
-	.mb-0 {
-		margin-bottom: 0;
-	}
-
-	/* Error states */
-	.error {
-		color: #ef4444;
-		font-size: 0.875rem;
-		margin-top: 0.5rem;
-	}
-
-	/* Success states */
-	.success {
-		color: #10b981;
-		font-size: 0.875rem;
-		margin-top: 0.5rem;
-	}
-
-	/* Tooltip styles (for future enhancements) */
-	.tooltip {
-		position: relative;
-	}
-
-	.tooltip::after {
-		content: attr(data-tooltip);
-		position: absolute;
-		bottom: 100%;
-		left: 50%;
-		transform: translateX(-50%);
-		padding: 0.5rem 0.75rem;
-		background: rgba(0, 0, 0, 0.9);
-		color: white;
-		font-size: 0.75rem;
-		border-radius: 6px;
-		white-space: nowrap;
-		opacity: 0;
-		pointer-events: none;
-		transition: opacity 0.2s;
-	}
-
-	.tooltip:hover::after {
-		opacity: 1;
-	}
-
-	/* Badge variations */
-	.badge {
-		display: inline-block;
-		padding: 0.25rem 0.5rem;
-		border-radius: 4px;
-		font-size: 0.75rem;
-		font-weight: 600;
-		text-transform: uppercase;
-		letter-spacing: 0.05em;
-	}
-
-	.badge.small {
-		padding: 0.125rem 0.375rem;
-		font-size: 0.625rem;
-	}
-
-	.badge.large {
-		padding: 0.375rem 0.75rem;
-		font-size: 0.875rem;
-	}
-
-	/* Ensure consistent scrollbar styling */
-	.admin-container {
-		scrollbar-width: thin;
-		scrollbar-color: rgba(255, 255, 255, 0.2) transparent;
-	}
-
-	.admin-container::-webkit-scrollbar {
-		width: 8px;
-		height: 8px;
-	}
-
-	.admin-container::-webkit-scrollbar-track {
-		background: transparent;
-	}
-
-	.admin-container::-webkit-scrollbar-thumb {
-		background: rgba(255, 255, 255, 0.2);
-		border-radius: 4px;
-	}
-
-	.admin-container::-webkit-scrollbar-thumb:hover {
-		background: rgba(255, 255, 255, 0.3);
 	}
 </style>

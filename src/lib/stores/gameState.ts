@@ -190,16 +190,20 @@ function createGameStore() {
 			const currentState = get({ subscribe });
 			const oldStatus = currentState?.gameState?.status;
 
-			if (oldStatus && oldStatus !== payload.new.status) {
-				window.dispatchEvent(
-					new CustomEvent('gamePhaseChange', {
-						detail: {
-							oldPhase: oldStatus,
-							newPhase: payload.new.status,
-							gameState: payload.new
-						}
-					})
-				);
+			// if(Object.keys(obj).lengthpayload.new.status !== {}){}
+
+			if (Object.keys(payload.new) !== 0) {
+				if (oldStatus && oldStatus !== payload.new.status) {
+					window.dispatchEvent(
+						new CustomEvent('gamePhaseChange', {
+							detail: {
+								oldPhase: oldStatus,
+								newPhase: payload.new.status,
+								gameState: payload.new
+							}
+						})
+					);
+				}
 			}
 		}
 	}
